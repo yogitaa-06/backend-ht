@@ -1,6 +1,11 @@
 .git
 .gitignore
 .env
+.env.*
+.local
+.uv-cache
+.uv-python
+dist
 .venv
 __pycache__
 .pytest_cache

@@ -10,11 +10,14 @@ Security:
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.db.urls import parse_database_url
 
 Environment = Literal["local", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -29,6 +32,7 @@ class Settings(BaseSettings):
         env_prefix="HIREANDTECH_",
         case_sensitive=False,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     application_name: str = "HireAndTech API"
@@ -37,6 +41,38 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
     cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    database_url: SecretStr | None = None
+    database_migration_url: SecretStr | None = None
+    database_ssl_mode: Literal["disable", "verify-full"] = "verify-full"
+    database_ssl_ca_file: Path | None = None
+    database_pool_size: int = Field(default=5, ge=1, le=50)
+    database_max_overflow: int = Field(default=5, ge=0, le=50)
+    database_pool_timeout_seconds: float = Field(default=5, gt=0, le=60)
+    database_connect_timeout_seconds: float = Field(default=5, gt=0, le=60)
+    database_statement_timeout_seconds: float = Field(default=10, gt=0, le=300)
+
+    @field_validator("database_url", "database_migration_url")
+    @classmethod
+    def validate_database_url(cls, value: SecretStr | None) -> SecretStr | None:
+        """Validate secrets without exposing their original input in errors."""
+        if value is not None:
+            parse_database_url(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_database_tls(self) -> Self:
+        """Permit plaintext only for loopback development and test databases."""
+        if self.database_ssl_mode == "disable":
+            if self.environment not in {"local", "test"}:
+                raise ValueError("non-local databases require verify-full TLS")
+            for secret in (self.database_url, self.database_migration_url):
+                if secret and parse_database_url(secret).host not in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }:
+                    raise ValueError("TLS can only be disabled for a loopback database")
+        return self
 
     @field_validator("api_v1_prefix")
     @classmethod

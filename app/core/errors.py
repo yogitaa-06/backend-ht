@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.middleware import get_request_id
@@ -122,9 +123,24 @@ async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
+async def database_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Keep SQL, bound values, and driver diagnostics out of responses and logs."""
+    logger.error(
+        "database_request_failed",
+        extra={"operation": "database_request", "request_id": get_request_id(request)},
+    )
+    return _error_response(
+        request=request,
+        status_code=500,
+        code="INTERNAL_SERVER_ERROR",
+        message="An unexpected error occurred.",
+    )
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     """Register the complete API exception policy in one place."""
     application.add_exception_handler(ApplicationError, application_error_handler)
     application.add_exception_handler(RequestValidationError, validation_error_handler)
     application.add_exception_handler(StarletteHTTPException, http_error_handler)
+    application.add_exception_handler(SQLAlchemyError, database_error_handler)
     application.add_exception_handler(Exception, unexpected_error_handler)

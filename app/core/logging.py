@@ -21,6 +21,18 @@ class JsonFormatter(logging.Formatter):
     """Serialize log records into a stable, aggregation-friendly JSON shape."""
 
     def format(self, record: logging.LogRecord) -> str:
+        # Driver diagnostics may carry SQL literals or rejected record values even
+        # when SQLAlchemy hide_parameters=True. Keep infrastructure records opaque.
+        if record.name.startswith(("sqlalchemy.", "asyncpg.")):
+            return json.dumps(
+                {
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": "database_driver_event",
+                    "request_id": get_request_id(),
+                }
+            )
         payload: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
@@ -45,3 +57,4 @@ def configure_logging(log_level: str) -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(log_level)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

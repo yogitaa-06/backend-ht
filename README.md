@@ -109,7 +109,69 @@ infrastructure, and configure explicit public Host and frontend-origin values. P
 trust and client IP resolution will be introduced and documented in the dedicated IP
 security phase; forwarding headers must not be trusted until then.
 
-## Planned next phase
+##  phase 2
 
-Backend Phase 2 will add PostgreSQL/Supabase connectivity, migrations, and persistence
-conventions. It is intentionally not included in this foundation commit.
+
+Production-oriented FastAPI backend for HireAndTech, a global job intelligence and
+application-management platform.
+
+This backend repository is intentionally independent from the HireAndTech frontend.
+Frontend and backend are developed, tested, versioned, and committed separately.
+
+## Current scope
+
+Backend Phase 2 establishes the production application and PostgreSQL persistence
+foundation.
+
+Implemented capabilities include:
+
+- versioned FastAPI API routing;
+- application liveness and database-readiness endpoints;
+- typed environment configuration and deployment-safety validation;
+- JSON structured logging and request correlation IDs;
+- safe and consistent application error handling;
+- explicit Host and CORS allowlists;
+- asynchronous PostgreSQL connectivity through SQLAlchemy 2 and asyncpg;
+- bounded database connection pooling;
+- database connection, pool, and statement timeouts;
+- configurable PostgreSQL TLS policy;
+- request-scoped asynchronous database sessions;
+- private application PostgreSQL schema;
+- deterministic SQLAlchemy constraint naming conventions;
+- reusable UUID and timestamp persistence conventions;
+- Alembic migration framework;
+- migration-specific database connections;
+- unit and integration tests using real PostgreSQL;
+- linting, formatting, strict type checking, and coverage enforcement.
+
+Authentication, user profiles, IP access control, job-domain tables, queues, workers,
+scraping, matching, and AI processing are deliberately deferred to their dedicated
+incremental phases.
+
+## Architecture
+
+```text
+Client
+  |
+  v
+FastAPI
+  |
+  +--> API v1 routes
+  |
+  +--> configuration / logging / errors / middleware
+  |
+  v
+Database dependency
+  |
+  v
+SQLAlchemy 2 async
+  |
+  v
+asyncpg
+  |
+  v
+PostgreSQL
+     |
+     +--> private "hireandtech" schema
+     |
+     +--> Alembic migration history

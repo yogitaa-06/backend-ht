@@ -10,13 +10,16 @@ Responsibilities:
     - Register middleware, error handlers, and versioned API routes.
 
 Does NOT:
-    - Establish database or queue connections.
+    - Run migrations or create business tables at startup.
     - Implement authentication or business-domain behavior.
 
 Security:
     API documentation is disabled outside local and test environments. Host and
     CORS policies are explicit configuration rather than permissive defaults.
 """
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,12 +31,26 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
+from app.db.session import Database
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create an application instance with validated, injectable settings."""
     application_settings = settings or get_settings()
     configure_logging(application_settings.log_level)
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        """Own database resources and reject startup when connectivity is unavailable."""
+        database = Database(application_settings)
+        application.state.database = database
+        try:
+            if not await database.check_connection():
+                raise RuntimeError("Database is unavailable; API startup aborted")
+            yield
+        finally:
+            await database.close()
+            application.state.database = None
 
     expose_docs = application_settings.environment in {"local", "test"}
     application = FastAPI(
@@ -42,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs" if expose_docs else None,
         redoc_url=None,
         openapi_url="/openapi.json" if expose_docs else None,
+        lifespan=lifespan,
     )
     application.state.settings = application_settings
 

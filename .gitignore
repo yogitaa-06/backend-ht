@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+.local/
 .venv/
 .uv-cache/
 .uv-python/
