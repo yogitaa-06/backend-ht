@@ -1,0 +1,1 @@
+"""HireAndTech backend test suite."""
