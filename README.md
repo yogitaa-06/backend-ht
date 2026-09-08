@@ -6,27 +6,42 @@ the HireAndTech frontend.
 
 ## Current scope
 
-Backend Phase 1 establishes the application foundation:
+The current backend includes the production application foundation plus PostgreSQL
+persistence and authenticated access control:
 
 - versioned FastAPI routing and a dependency-free health endpoint;
 - typed environment configuration with deployment-safety validation;
 - JSON structured logging and request correlation IDs;
 - safe, consistent error handling;
 - explicit Host and CORS allowlists;
+- asynchronous PostgreSQL persistence and Alembic migrations;
+- Supabase JWT identity verification and local profile authorization;
 - unit and HTTP integration test foundations;
 - linting, strict type checking, coverage, and container configuration.
 
-Database access, authentication, IP policy enforcement, queues, and business domains
-are deliberately deferred to their dedicated incremental phases.
+IP policy enforcement, queues, and business domains remain deferred to their dedicated
+incremental phases.
+
+## Implementation Phases
+
+- [Phase 2 — PostgreSQL Persistence Foundation](docs/phases/phase-02-persistence-foundation.md)
+- [Phase 3 — Authenticated User Access Control](docs/phases/phase-03-authenticated-access-control.md)
 
 ## Architecture
 
 ```text
 app/
+├── api/root.py         Public, unversioned API landing endpoint
 ├── api/v1/             Versioned HTTP routing and endpoints
+├── auth/               Supabase JWT verification and access dependencies
 ├── core/               Configuration, errors, logging, and middleware
+├── db/                 Async PostgreSQL engine, sessions, and shared mappings
+├── domain/             Application persistence models and domain values
+├── repositories/       Focused database access
 ├── schemas/            Validated public API contracts
 └── main.py             Application factory and assembly
+migrations/             Alembic environment and ordered database revisions
+docs/phases/            Detailed implementation-phase documentation
 tests/
 ├── unit/               Isolated configuration and utility tests
 └── integration/        Full HTTP application behavior tests
@@ -48,8 +63,27 @@ uv sync
 uv run uvicorn app.main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`. Local interactive documentation is
-at `/docs`; the liveness endpoint is `GET /api/v1/health`.
+Populate the copied `.env` with local values before starting the application; the
+tracked template intentionally contains no credentials.
+
+Local URLs with the default port and API prefix:
+
+| Endpoint | URL |
+| --- | --- |
+| API root | `http://127.0.0.1:8000/` |
+| Swagger | `http://127.0.0.1:8000/docs` |
+| Health | `http://127.0.0.1:8000/api/v1/health` |
+| Readiness | `http://127.0.0.1:8000/api/v1/health/ready` |
+| Current user (bearer token required) | `http://127.0.0.1:8000/api/v1/auth/me` |
+
+`GET /` returns public API metadata and relative docs/health links. It requires no
+authentication and performs no database, Supabase, or readiness checks. The docs
+link is `null` in staging/production, where Swagger is disabled. The health link
+follows the configured API prefix. The application startup database check remains
+unchanged.
+
+If port 8000 is occupied, choose another port with `--port 8001` and use that port
+in the URLs above. Restart a server started without `--reload` after code changes.
 
 ## Quality checks
 
@@ -68,10 +102,24 @@ Perform a startup smoke check with:
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
+To inspect registered routes with the locked FastAPI version:
+
+```powershell
+uv run python -c "from app.main import app; from fastapi.routing import iter_route_contexts; [print(','.join(sorted(r.methods or [])), r.path) for r in iter_route_contexts(app.routes) if r.path is not None]"
+```
+
+FastAPI 0.137+ preserves included routers in `app.routes`, so a shallow `.path`
+filter can hide working endpoints behind `_IncludedRouter` entries. The public
+`iter_route_contexts()` helper (added in 0.137.2) resolves nested routes and their
+prefixes; see the [FastAPI release notes](https://fastapi.tiangolo.com/release-notes/#01372-2026-06-18).
+With the default API prefix, the output includes `GET /`, `GET /api/v1/auth/me`,
+`GET /api/v1/health`, and `GET /api/v1/health/ready`. Route registration does not
+require database startup; `/auth/me` without a bearer token should return 401.
+
 ## Environment variables
 
-All variables use the `HIREANDTECH_` prefix. See `.env.example` for copyable local
-defaults.
+All variables use the `HIREANDTECH_` prefix. See `.env.example` for the local
+configuration template and fill its blank assignments before startup.
 
 | Variable | Purpose | Local default |
 | --- | --- | --- |
@@ -83,6 +131,27 @@ defaults.
 Wildcard Host and CORS entries are rejected. Staging and production must provide
 explicit non-local allowlists. Secrets must be supplied through the deployment's
 secret manager and must never be added to `.env.example` or committed `.env` files.
+
+## Authentication and authorization
+
+Supabase Auth is the identity provider; HireAndTech does not expose public signup or
+store passwords. Administrators provision a matching record in
+`hireandtech.profiles`. Requests follow this trust path:
+
+```text
+Frontend -> Supabase Auth -> bearer access token -> FastAPI JWT verification
+         -> local profile lookup -> active check -> application role authorization
+```
+
+JWT signatures are verified against the project's JWKS with issuer, audience,
+expiration, issued-at, subject, and asymmetric-algorithm checks. The provider `role`
+claim is never used for HireAndTech authorization. Employee/admin access comes only
+from the active local profile, and a missing profile is not created automatically.
+
+Authentication requires `HIREANDTECH_SUPABASE_URL` (for example,
+`https://YOUR_PROJECT_REF.supabase.co`) and
+`HIREANDTECH_SUPABASE_JWT_AUDIENCE` (normally `authenticated`). Neither value is a
+secret; provider keys, JWTs, and database credentials must not be committed.
 
 ## Error and logging contracts
 
@@ -108,70 +177,3 @@ For staging and production, disable public access to `/docs`, terminate TLS at t
 infrastructure, and configure explicit public Host and frontend-origin values. Proxy
 trust and client IP resolution will be introduced and documented in the dedicated IP
 security phase; forwarding headers must not be trusted until then.
-
-##  phase 2
-
-
-Production-oriented FastAPI backend for HireAndTech, a global job intelligence and
-application-management platform.
-
-This backend repository is intentionally independent from the HireAndTech frontend.
-Frontend and backend are developed, tested, versioned, and committed separately.
-
-## Current scope
-
-Backend Phase 2 establishes the production application and PostgreSQL persistence
-foundation.
-
-Implemented capabilities include:
-
-- versioned FastAPI API routing;
-- application liveness and database-readiness endpoints;
-- typed environment configuration and deployment-safety validation;
-- JSON structured logging and request correlation IDs;
-- safe and consistent application error handling;
-- explicit Host and CORS allowlists;
-- asynchronous PostgreSQL connectivity through SQLAlchemy 2 and asyncpg;
-- bounded database connection pooling;
-- database connection, pool, and statement timeouts;
-- configurable PostgreSQL TLS policy;
-- request-scoped asynchronous database sessions;
-- private application PostgreSQL schema;
-- deterministic SQLAlchemy constraint naming conventions;
-- reusable UUID and timestamp persistence conventions;
-- Alembic migration framework;
-- migration-specific database connections;
-- unit and integration tests using real PostgreSQL;
-- linting, formatting, strict type checking, and coverage enforcement.
-
-Authentication, user profiles, IP access control, job-domain tables, queues, workers,
-scraping, matching, and AI processing are deliberately deferred to their dedicated
-incremental phases.
-
-## Architecture
-
-```text
-Client
-  |
-  v
-FastAPI
-  |
-  +--> API v1 routes
-  |
-  +--> configuration / logging / errors / middleware
-  |
-  v
-Database dependency
-  |
-  v
-SQLAlchemy 2 async
-  |
-  v
-asyncpg
-  |
-  v
-PostgreSQL
-     |
-     +--> private "hireandtech" schema
-     |
-     +--> Alembic migration history

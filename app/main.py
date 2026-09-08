@@ -11,7 +11,7 @@ Responsibilities:
 
 Does NOT:
     - Run migrations or create business tables at startup.
-    - Implement authentication or business-domain behavior.
+    - Implement business-domain behavior inside the composition layer.
 
 Security:
     API documentation is disabled outside local and test environments. Host and
@@ -26,7 +26,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
+from app.api.root import router as root_router
 from app.api.v1.router import router as v1_router
+from app.auth.verifier import SupabaseJwtVerifier
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -62,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = application_settings
+    application.state.supabase_jwt_verifier = SupabaseJwtVerifier(application_settings)
 
     application.add_middleware(
         CORSMiddleware,
@@ -77,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(RequestContextMiddleware)
 
     register_exception_handlers(application)
+    application.include_router(root_router, tags=["system"])
     application.include_router(v1_router, prefix=application_settings.api_v1_prefix)
     return application
 

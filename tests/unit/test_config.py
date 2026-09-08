@@ -61,3 +61,44 @@ def test_production_accepts_explicit_network_configuration() -> None:
     )
 
     assert settings.environment == "production"
+
+
+def test_supabase_url_derives_authentication_endpoints() -> None:
+    settings = Settings(
+        supabase_url="https://example.supabase.co/",
+        _env_file=None,
+    )
+
+    assert settings.supabase_url == "https://example.supabase.co"
+    assert settings.supabase_jwt_issuer == "https://example.supabase.co/auth/v1"
+    assert settings.supabase_jwks_url == "https://example.supabase.co/auth/v1/.well-known/jwks.json"
+    assert settings.supabase_jwt_audience == "authenticated"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.supabase.co",
+        "https://example.supabase.co/path",
+        "https://user:password@example.supabase.co",
+        "https://example.supabase.co?query=value",
+        "https://example.supabase.co#fragment",
+        "https://example.supabase.co:99999",
+        "not-a-url",
+    ],
+)
+def test_supabase_url_rejects_invalid_origins(url: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            supabase_url=url,
+            _env_file=None,
+        )
+
+
+def test_supabase_authentication_configuration_is_optional_locally() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.supabase_url is None
+    assert settings.supabase_jwt_issuer is None
+    assert settings.supabase_jwks_url is None
+    assert settings.supabase_jwt_audience == "authenticated"

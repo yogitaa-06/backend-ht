@@ -12,6 +12,7 @@ Security:
 """
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +34,7 @@ class ApplicationError(Exception):
     code: str
     message: str
     status_code: int = status.HTTP_400_BAD_REQUEST
+    headers: Mapping[str, str] | None = None
 
 
 def _error_response(
@@ -42,6 +44,7 @@ def _error_response(
     code: str,
     message: str,
     details: list[dict[str, Any]] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     content: dict[str, Any] = {
         "error": {
@@ -52,10 +55,13 @@ def _error_response(
     }
     if details is not None:
         content["details"] = details
+    response_headers = {"X-Request-ID": get_request_id(request)}
+    if headers is not None:
+        response_headers.update(headers)
     return JSONResponse(
         status_code=status_code,
         content=content,
-        headers={"X-Request-ID": get_request_id(request)},
+        headers=response_headers,
     )
 
 
@@ -68,6 +74,7 @@ async def application_error_handler(request: Request, exc: Exception) -> JSONRes
         status_code=exc.status_code,
         code=exc.code,
         message=exc.message,
+        headers=exc.headers,
     )
 
 
@@ -106,6 +113,7 @@ async def http_error_handler(request: Request, exc: Exception) -> JSONResponse:
         status_code=exc.status_code,
         code=code,
         message=message,
+        headers=exc.headers,
     )
 
 

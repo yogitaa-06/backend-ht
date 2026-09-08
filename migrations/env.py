@@ -7,9 +7,9 @@ schema and cannot propose changes to Supabase auth, storage, or public schemas.
 """
 
 import asyncio
-from typing import Any
 
 from alembic import context
+from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from alembic.util import CommandError
 from sqlalchemy import Connection, text
 
@@ -17,9 +17,16 @@ from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.base import SCHEMA, Base
 from app.db.session import create_database_engine
+from app.domain.profiles import Profile
+
+_ = Profile
 
 
-def include_name(name: str | None, type_: str, parent_names: dict[str, Any]) -> bool:
+def include_name(
+    name: str | None,
+    type_: NameFilterType,
+    parent_names: NameFilterParentNames,
+) -> bool:
     """Restrict reflection to our schema; future models must be imported above."""
     if type_ == "schema":
         return name == SCHEMA
