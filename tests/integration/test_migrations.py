@@ -11,7 +11,7 @@ TEST_DATABASE_URL = os.getenv("HIREANDTECH_TEST_DATABASE_URL")
     TEST_DATABASE_URL is None,
     reason="HIREANDTECH_TEST_DATABASE_URL is not configured",
 )
-def test_alembic_upgrade_head_succeeds() -> None:
+def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
     assert TEST_DATABASE_URL is not None
 
     env = os.environ.copy()
@@ -20,21 +20,17 @@ def test_alembic_upgrade_head_succeeds() -> None:
     env["HIREANDTECH_DATABASE_MIGRATION_URL"] = TEST_DATABASE_URL
     env["HIREANDTECH_DATABASE_SSL_MODE"] = "disable"
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "upgrade",
-            "head",
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-
-    assert result.returncode == 0, (
-        f"Alembic migration failed.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    for arguments in (
+        ("upgrade", "head"),
+        ("downgrade", "0002_profiles"),
+        ("upgrade", "head"),
+    ):
+        result = subprocess.run(  # noqa: S603 - arguments are fixed test constants.
+            [sys.executable, "-m", "alembic", *arguments],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0, f"Alembic {' '.join(arguments)} failed"

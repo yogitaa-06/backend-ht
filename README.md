@@ -7,7 +7,7 @@ the HireAndTech frontend.
 ## Current scope
 
 The current backend includes the production application foundation plus PostgreSQL
-persistence and authenticated access control:
+persistence, authenticated access control, and IP security:
 
 - versioned FastAPI routing and a dependency-free health endpoint;
 - typed environment configuration with deployment-safety validation;
@@ -16,16 +16,18 @@ persistence and authenticated access control:
 - explicit Host and CORS allowlists;
 - asynchronous PostgreSQL persistence and Alembic migrations;
 - Supabase JWT identity verification and local profile authorization;
+- trusted-proxy-aware IP allowlisting and append-oriented security auditing;
+- bounded route-specific rate limiting for authentication and security administration;
 - unit and HTTP integration test foundations;
 - linting, strict type checking, coverage, and container configuration.
 
-IP policy enforcement, queues, and business domains remain deferred to their dedicated
-incremental phases.
+Queues and business domains remain deferred to their dedicated incremental phases.
 
 ## Implementation Phases
 
 - [Phase 2 — PostgreSQL Persistence Foundation](docs/phases/phase-02-persistence-foundation.md)
 - [Phase 3 — Authenticated User Access Control](docs/phases/phase-03-authenticated-access-control.md)
+- [Phase 4 — IP Security](docs/phases/phase-04-ip-security.md)
 
 ## Architecture
 
@@ -75,6 +77,7 @@ Local URLs with the default port and API prefix:
 | Health | `http://127.0.0.1:8000/api/v1/health` |
 | Readiness | `http://127.0.0.1:8000/api/v1/health/ready` |
 | Current user (bearer token required) | `http://127.0.0.1:8000/api/v1/auth/me` |
+| IP security administration | `http://127.0.0.1:8000/api/v1/admin/security/ip/current` |
 
 `GET /` returns public API metadata and relative docs/health links. It requires no
 authentication and performs no database, Supabase, or readiness checks. The docs
@@ -127,6 +130,10 @@ configuration template and fill its blank assignments before startup.
 | `HIREANDTECH_LOG_LEVEL` | Application logging threshold | `INFO` |
 | `HIREANDTECH_ALLOWED_HOSTS` | JSON array of accepted HTTP Host values | localhost only |
 | `HIREANDTECH_CORS_ALLOWED_ORIGINS` | JSON array of browser origins | local frontend |
+| `HIREANDTECH_TRUSTED_PROXY_CIDRS` | Peers permitted to supply forwarding chains | `[]` |
+| `HIREANDTECH_IP_ALLOWLIST_ENABLED` | Enforce persistent CIDR rules | `false` |
+| `HIREANDTECH_IP_ALLOWLIST_FAIL_CLOSED` | Deny on rule-store failure | `true` |
+| `HIREANDTECH_IP_EMERGENCY_BYPASS_CIDRS` | Configuration-only recovery networks | `[]` |
 
 Wildcard Host and CORS entries are rejected. Staging and production must provide
 explicit non-local allowlists. Secrets must be supplied through the deployment's
@@ -153,6 +160,29 @@ Authentication requires `HIREANDTECH_SUPABASE_URL` (for example,
 `HIREANDTECH_SUPABASE_JWT_AUDIENCE` (normally `authenticated`). Neither value is a
 secret; provider keys, JWTs, and database credentials must not be committed.
 
+## IP security
+
+IP policy is an additional control and never replaces Supabase identity or the local
+application role. The socket peer is used by default. `X-Forwarded-For` is considered
+only when that peer is inside `HIREANDTECH_TRUSTED_PROXY_CIDRS`; trusted proxy hops are
+then removed from right to left. `X-Real-IP` is never authoritative. Configure only the
+proxies that connect directly to Uvicorn and correctly append forwarding information.
+
+When enabled, persistent `hireandtech.ip_access_rules` are checked before authentication.
+Only `OPTIONS`, liveness, and readiness bypass the database policy. Database failures
+deny by default; fail-open is accepted only in local/test. Configuration-only emergency
+CIDRs permit recovery and generate audit events when the database is available. There
+is no unauthenticated recovery endpoint.
+
+Administrators manage rules and inspect audit history beneath `/api/v1/admin/security`.
+Disabling or deleting the final rule matching the current administrator is rejected
+unless their resolved IP is in an emergency recovery CIDR.
+
+Phase 4 rate limits authentication and admin-security route groups using the trusted
+resolved IP. Counters are capacity-bounded and per process. Multi-instance deployments
+can replace the injectable store with shared infrastructure in a future operational
+phase; Phase 4 does not introduce Redis or claim globally coordinated limits.
+
 ## Error and logging contracts
 
 Errors use a stable envelope with a machine-readable code, safe message, and request
@@ -174,6 +204,5 @@ docker run --rm -p 8000:8000 --env-file .env hireandtech-backend
 ```
 
 For staging and production, disable public access to `/docs`, terminate TLS at trusted
-infrastructure, and configure explicit public Host and frontend-origin values. Proxy
-trust and client IP resolution will be introduced and documented in the dedicated IP
-security phase; forwarding headers must not be trusted until then.
+infrastructure, configure explicit public Host and frontend-origin values, and keep
+trusted-proxy CIDRs synchronized with the direct application network path.

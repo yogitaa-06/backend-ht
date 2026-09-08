@@ -18,6 +18,7 @@ Security:
     CORS policies are explicit configuration rather than permissive defaults.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -34,6 +35,11 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import Database
+from app.security.ip import TrustedClientIpResolver
+from app.security.middleware import IpSecurityMiddleware
+from app.security.rate_limit import BoundedMemoryRateLimitStore, RouteRateLimiter
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,6 +53,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database = Database(application_settings)
         application.state.database = database
         try:
+            logger.info(
+                "ip_allowlist_enabled"
+                if application_settings.ip_allowlist_enabled
+                else "ip_allowlist_disabled",
+                extra={"operation": "application_startup"},
+            )
             if not await database.check_connection():
                 raise RuntimeError("Database is unavailable; API startup aborted")
             yield
@@ -65,6 +77,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = application_settings
     application.state.supabase_jwt_verifier = SupabaseJwtVerifier(application_settings)
+    rate_limit_store = BoundedMemoryRateLimitStore(application_settings.rate_limit_max_keys)
+    application.state.rate_limit_store = rate_limit_store
 
     application.add_middleware(
         CORSMiddleware,
@@ -76,6 +90,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=application_settings.allowed_hosts,
+    )
+    application.add_middleware(
+        IpSecurityMiddleware,
+        settings=application_settings,
+        resolver=TrustedClientIpResolver(application_settings.trusted_proxy_cidrs),
+        rate_limiter=RouteRateLimiter(
+            rate_limit_store, fail_closed=application_settings.rate_limit_fail_closed
+        ),
     )
     application.add_middleware(RequestContextMiddleware)
 

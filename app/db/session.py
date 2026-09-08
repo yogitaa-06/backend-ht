@@ -45,6 +45,9 @@ def create_database_engine(settings: Settings, *, migration: bool = False) -> As
     options: dict[str, Any] = {
         "echo": False,
         "hide_parameters": True,
+        # Keep PostgreSQL INET/CIDR values as canonical strings at the application
+        # boundary rather than driver-specific ipaddress result objects.
+        "native_inet_types": False,
         "connect_args": {
             "ssl": tls,
             "timeout": settings.database_connect_timeout_seconds,

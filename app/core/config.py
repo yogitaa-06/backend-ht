@@ -29,6 +29,7 @@ Security:
 """
 
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
@@ -41,6 +42,7 @@ from app.db.urls import parse_database_url
 Environment = Literal["local", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 SupabaseJwtAudience = Literal["authenticated"]
+IpNetwork = IPv4Network | IPv6Network
 
 
 class Settings(BaseSettings):
@@ -64,6 +66,16 @@ class Settings(BaseSettings):
     # Network security
     allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
     cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    trusted_proxy_cidrs: list[IpNetwork] = Field(default_factory=list)
+    ip_allowlist_enabled: bool = False
+    ip_allowlist_fail_closed: bool = True
+    ip_emergency_bypass_cidrs: list[IpNetwork] = Field(default_factory=list)
+    rate_limit_enabled: bool = True
+    rate_limit_fail_closed: bool = True
+    rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    rate_limit_auth_requests: int = Field(default=30, ge=1, le=10_000)
+    rate_limit_admin_security_requests: int = Field(default=60, ge=1, le=10_000)
+    rate_limit_max_keys: int = Field(default=10_000, ge=100, le=1_000_000)
 
     # PostgreSQL
     database_url: SecretStr | None = None
@@ -79,6 +91,22 @@ class Settings(BaseSettings):
     # Supabase authentication
     supabase_url: str | None = None
     supabase_jwt_audience: SupabaseJwtAudience = "authenticated"
+
+    @field_validator("trusted_proxy_cidrs", "ip_emergency_bypass_cidrs", mode="before")
+    @classmethod
+    def normalize_ip_networks(cls, value: object) -> object:
+        """Normalize configured IPv4/IPv6 networks and reject malformed entries."""
+        if not isinstance(value, (list, tuple)):
+            return value
+        normalized: list[IpNetwork] = []
+        for item in value:
+            if not isinstance(item, (str, IPv4Network, IPv6Network)):
+                raise ValueError("IP network entries must be CIDR strings")
+            try:
+                normalized.append(ip_network(item, strict=False))
+            except ValueError:
+                raise ValueError("IP network entries must be valid IPv4 or IPv6 CIDRs") from None
+        return normalized
 
     @field_validator("database_url", "database_migration_url")
     @classmethod
@@ -232,6 +260,8 @@ class Settings(BaseSettings):
         Non-local environments must explicitly configure Host and CORS allowlists.
         """
         if self.environment in {"staging", "production"}:
+            if not self.ip_allowlist_fail_closed or not self.rate_limit_fail_closed:
+                raise ValueError("non-local security controls must fail closed")
             if self.allowed_hosts == [
                 "localhost",
                 "127.0.0.1",
