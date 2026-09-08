@@ -61,16 +61,22 @@ def test_multiple_forwarded_header_values_and_whitespace_are_supported() -> None
 
 
 @pytest.mark.parametrize("forwarded", ["bad-ip", "198.51.100.8,", ",198.51.100.8"])
-def test_malformed_forwarded_chain_falls_back_to_trusted_peer(forwarded: str) -> None:
+def test_malformed_forwarded_chain_from_trusted_proxy_is_unresolved(forwarded: str) -> None:
     resolver = TrustedClientIpResolver([ip_network("10.0.0.0/8")])
 
-    assert resolver.resolve("10.0.0.4", forwarded_values=[forwarded]) == ip_address("10.0.0.4")
+    assert resolver.resolve("10.0.0.4", forwarded_values=[forwarded]) is None
 
 
 def test_x_real_ip_is_never_authoritative() -> None:
     resolver = TrustedClientIpResolver([ip_network("10.0.0.0/8")])
 
-    assert resolver.resolve("10.0.0.4", {"x-real-ip": "198.51.100.9"}) == ip_address("10.0.0.4")
+    assert resolver.resolve("10.0.0.4", {"x-real-ip": "198.51.100.9"}) is None
+
+
+def test_trusted_proxy_without_forwarded_chain_is_unresolved() -> None:
+    resolver = TrustedClientIpResolver([ip_network("10.0.0.0/8")])
+
+    assert resolver.resolve("10.0.0.4") is None
 
 
 def test_ipv4_mapped_ipv6_is_normalized() -> None:

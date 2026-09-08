@@ -11,6 +11,7 @@ TEST_DATABASE_URL = os.getenv("HIREANDTECH_TEST_DATABASE_URL")
     TEST_DATABASE_URL is None,
     reason="HIREANDTECH_TEST_DATABASE_URL is not configured",
 )
+@pytest.mark.database
 def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
     assert TEST_DATABASE_URL is not None
 

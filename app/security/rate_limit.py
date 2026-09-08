@@ -35,17 +35,25 @@ class BoundedMemoryRateLimitStore:
     def __init__(self, max_keys: int, *, clock: Clock = monotonic) -> None:
         self._max_keys = max_keys
         self._clock = clock
-        self._entries: OrderedDict[str, tuple[float, int]] = OrderedDict()
+        self._entries: OrderedDict[str, tuple[float, int, int]] = OrderedDict()
         self._lock = asyncio.Lock()
 
     async def consume(self, key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
         async with self._lock:
             now = self._clock()
-            started_at, count = self._entries.pop(key, (now, 0))
-            if now - started_at >= window_seconds:
+            expired_keys = [
+                existing_key
+                for existing_key, (started_at, _, stored_window) in self._entries.items()
+                if now - started_at >= stored_window
+            ]
+            for expired_key in expired_keys:
+                del self._entries[expired_key]
+
+            started_at, count, stored_window = self._entries.pop(key, (now, 0, window_seconds))
+            if stored_window != window_seconds or now - started_at >= window_seconds:
                 started_at, count = now, 0
             count += 1
-            self._entries[key] = (started_at, count)
+            self._entries[key] = (started_at, count, window_seconds)
             while len(self._entries) > self._max_keys:
                 self._entries.popitem(last=False)
             retry_after = max(1, int(window_seconds - (now - started_at) + 0.999))

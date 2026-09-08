@@ -24,8 +24,10 @@ The direct socket peer is authoritative by default. Forwarding values are used o
 the immediate peer belongs to `HIREANDTECH_TRUSTED_PROXY_CIDRS`. A completely parseable
 `X-Forwarded-For` chain is processed from right to left, stopping at the first untrusted
 hop. This prevents a spoofed leftmost value from overriding the hop appended by a
-correct proxy. Malformed chains safely fall back to the socket peer. `X-Real-IP` is not
-trusted. IPv4-mapped IPv6 values are normalized to IPv4.
+correct proxy. A missing or malformed chain from a trusted proxy resolves to no client
+IP and therefore fails closed when allowlisting is enabled. It never falls back to the
+trusted proxy address. `X-Real-IP` is not trusted. IPv4-mapped IPv6 values are normalized
+to IPv4.
 
 Deployments must list only proxies that connect directly to Uvicorn and correctly
 append or overwrite forwarding information.

@@ -167,6 +167,8 @@ application role. The socket peer is used by default. `X-Forwarded-For` is consi
 only when that peer is inside `HIREANDTECH_TRUSTED_PROXY_CIDRS`; trusted proxy hops are
 then removed from right to left. `X-Real-IP` is never authoritative. Configure only the
 proxies that connect directly to Uvicorn and correctly append forwarding information.
+Malformed or missing forwarding chains from trusted proxies resolve to no client IP and
+fail closed when allowlisting is enabled; the proxy address is never used as the client.
 
 When enabled, persistent `hireandtech.ip_access_rules` are checked before authentication.
 Only `OPTIONS`, liveness, and readiness bypass the database policy. Database failures

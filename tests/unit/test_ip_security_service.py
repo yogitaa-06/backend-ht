@@ -241,6 +241,33 @@ async def test_final_matching_rule_cannot_lock_out_admin(operation: str) -> None
     database_session.commit.assert_not_awaited()
 
 
+async def test_ipv6_final_matching_rule_cannot_lock_out_admin() -> None:
+    current_rule = rule()
+    current_rule.cidr = "2001:db8::/64"
+    rules = AsyncMock(spec=IpRuleRepository)
+    rules.get.return_value = current_rule
+    rules.list_enabled.return_value = [current_rule]
+    database_session = session()
+    secured_service = service(rules, enabled=True)
+    actor = profile()
+
+    with pytest.raises(ApplicationError) as exc_info:
+        await secured_service.update_rule(
+            database_session,
+            audit_context(actor, normalize_ip("2001:db8::9"), None),
+            current_rule.id,
+            cidr=None,
+            label=None,
+            description=None,
+            description_set=False,
+            enabled=False,
+            current_ip=normalize_ip("2001:db8::9"),
+        )
+
+    assert exc_info.value.status_code == 409
+    database_session.commit.assert_not_awaited()
+
+
 async def test_emergency_network_permits_recovery_mutation() -> None:
     current_rule = rule()
     rules = AsyncMock(spec=IpRuleRepository)

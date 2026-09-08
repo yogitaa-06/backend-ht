@@ -30,6 +30,7 @@ class IpAccessRule(IdentityTimestampMixin, Base):
             "ix_ip_access_rules_enabled_cidr",
             "cidr",
             postgresql_using="gist",
+            postgresql_ops={"cidr": "inet_ops"},
             postgresql_where=text("enabled"),
         ),
     )

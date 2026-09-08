@@ -58,6 +58,11 @@ class FakeRuleRepository:
         return self.allowed
 
 
+class FailingRateLimitStore:
+    async def consume(self, key: str, *, limit: int, window_seconds: int) -> object:
+        raise RuntimeError("rate-limit backend detail")
+
+
 def settings(**overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "_env_file": None,
@@ -71,12 +76,19 @@ def settings(**overrides: Any) -> Settings:
     return Settings(**values)
 
 
-def build_app(config: Settings, rules: FakeRuleRepository) -> tuple[FastAPI, FakeDatabase]:
+def build_app(
+    config: Settings,
+    rules: FakeRuleRepository,
+    *,
+    rate_store: object | None = None,
+) -> tuple[FastAPI, FakeDatabase]:
     app = FastAPI()
     database = FakeDatabase()
     app.add_api_route("/private", lambda: {"ok": True})
     app.add_api_route("/api/v1/auth/me", lambda: {"ok": True})
+    app.add_api_route("/api/v1/admin/security/ip-rules", lambda: {"ok": True})
     app.add_api_route("/api/v1/health", lambda: {"status": "ok"})
+    app.add_api_route("/api/v1/health/ready", lambda: {"status": "ready"})
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.cors_allowed_origins,
@@ -88,7 +100,10 @@ def build_app(config: Settings, rules: FakeRuleRepository) -> tuple[FastAPI, Fak
         settings=config,
         resolver=TrustedClientIpResolver(config.trusted_proxy_cidrs),
         rate_limiter=RouteRateLimiter(
-            BoundedMemoryRateLimitStore(config.rate_limit_max_keys),
+            cast(
+                Any,
+                rate_store or BoundedMemoryRateLimitStore(config.rate_limit_max_keys),
+            ),
             fail_closed=config.rate_limit_fail_closed,
         ),
         rule_repository=cast(Any, rules),
@@ -193,6 +208,7 @@ async def test_health_and_cors_preflight_are_intentionally_excluded(
     monkeypatch.setattr("app.security.middleware.get_database", lambda _: database)
 
     health = await request(app, path="/api/v1/health")
+    readiness = await request(app, path="/api/v1/health/ready")
     preflight = await request(
         app,
         path="/private",
@@ -201,6 +217,7 @@ async def test_health_and_cors_preflight_are_intentionally_excluded(
     )
 
     assert health.status_code == 200
+    assert readiness.status_code == 200
     assert preflight.status_code == 200
     assert preflight.headers["Access-Control-Allow-Origin"] == "http://frontend.test"
     assert rules.calls == []
@@ -243,6 +260,76 @@ async def test_auth_route_limit_returns_429_with_retry_after(
     assert second.status_code == 429
     assert second.json()["error"]["code"] == "RATE_LIMITED"
     assert second.headers["Retry-After"] == "60"
+
+
+async def test_admin_security_route_limit_returns_429_with_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rules = FakeRuleRepository(True)
+    app, database = build_app(
+        settings(
+            ip_allowlist_enabled=False,
+            rate_limit_enabled=True,
+            rate_limit_admin_security_requests=1,
+        ),
+        rules,
+    )
+    monkeypatch.setattr("app.security.middleware.get_database", lambda _: database)
+
+    first = await request(app, path="/api/v1/admin/security/ip-rules")
+    second = await request(app, path="/api/v1/admin/security/ip-rules")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["error"]["code"] == "RATE_LIMITED"
+    assert second.headers["Retry-After"] == "60"
+
+
+@pytest.mark.parametrize(("fail_closed", "status_code"), [(True, 503), (False, 200)])
+async def test_rate_limit_store_failure_http_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+    fail_closed: bool,
+    status_code: int,
+) -> None:
+    rules = FakeRuleRepository(True)
+    app, database = build_app(
+        settings(
+            ip_allowlist_enabled=False,
+            rate_limit_enabled=True,
+            rate_limit_fail_closed=fail_closed,
+        ),
+        rules,
+        rate_store=FailingRateLimitStore(),
+    )
+    monkeypatch.setattr("app.security.middleware.get_database", lambda _: database)
+
+    response = await request(app, path="/api/v1/auth/me")
+
+    assert response.status_code == status_code
+    assert "rate-limit backend detail" not in response.text
+    if fail_closed:
+        assert response.json()["error"]["code"] == "RATE_LIMIT_UNAVAILABLE"
+
+
+async def test_malformed_forwarded_chain_from_trusted_proxy_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rules = FakeRuleRepository(True)
+    app, database = build_app(
+        settings(trusted_proxy_cidrs=["10.0.0.0/8"]),
+        rules,
+    )
+    monkeypatch.setattr("app.security.middleware.get_database", lambda _: database)
+
+    response = await request(
+        app,
+        headers={"X-Forwarded-For": "malformed, 192.0.2.9"},
+        client_ip="10.0.0.4",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "IP_ACCESS_DENIED"
+    assert rules.calls == []
 
 
 async def test_trusted_forwarded_ip_is_used_for_allowlist_key(

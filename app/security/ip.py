@@ -63,15 +63,15 @@ class TrustedClientIpResolver:
             if forwarded is not None:
                 values.append(forwarded)
         if not values:
-            return peer
+            return None
 
         parts = [part.strip() for value in values for part in value.split(",")]
         if not parts or any(not part for part in parts):
-            return peer
+            return None
         try:
             chain = [normalize_ip(part) for part in parts]
         except ValueError:
-            return peer
+            return None
 
         current = peer
         for candidate in reversed(chain):

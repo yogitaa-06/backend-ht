@@ -61,6 +61,7 @@ def upgrade() -> None:
         ["cidr"],
         schema="hireandtech",
         postgresql_using="gist",
+        postgresql_ops={"cidr": "inet_ops"},
         postgresql_where=sa.text("enabled"),
     )
     op.create_table(

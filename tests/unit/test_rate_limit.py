@@ -48,6 +48,20 @@ async def test_store_capacity_is_bounded() -> None:
     assert len(store._entries) == 2
 
 
+async def test_consumption_removes_expired_unrelated_keys() -> None:
+    now = 10.0
+    store = BoundedMemoryRateLimitStore(100, clock=lambda: now)
+    await store.consume("expired-unrelated", limit=5, window_seconds=10)
+    await store.consume("still-active", limit=5, window_seconds=30)
+
+    now = 21.0
+    await store.consume("new-key", limit=5, window_seconds=60)
+
+    assert "expired-unrelated" not in store._entries
+    assert "still-active" in store._entries
+    assert "new-key" in store._entries
+
+
 async def test_unavailable_store_obeys_closed_and_open_policies() -> None:
     store = AsyncMock()
     store.consume.side_effect = RuntimeError("backend unavailable")
