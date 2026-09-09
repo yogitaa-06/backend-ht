@@ -5,7 +5,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from httpx2 import ASGITransport, AsyncClient, Response
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.claims import VerifiedClaims

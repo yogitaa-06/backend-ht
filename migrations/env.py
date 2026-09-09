@@ -18,9 +18,16 @@ from app.core.logging import configure_logging
 from app.db.base import SCHEMA, Base
 from app.db.session import create_database_engine
 from app.domain.profiles import Profile
+from app.domain.resumes import CandidateProfile, Resume
 from app.domain.security import IpAccessRule, SecurityAuditEvent
 
-_ = (Profile, IpAccessRule, SecurityAuditEvent)
+_ = (
+    Profile,
+    IpAccessRule,
+    SecurityAuditEvent,
+    Resume,
+    CandidateProfile,
+)
 
 
 def include_name(

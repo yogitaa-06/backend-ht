@@ -1,7 +1,7 @@
 """HTTP regression tests for the lightweight public API landing endpoint."""
 
 import pytest
-from httpx2 import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Environment, Settings
 from app.main import create_app

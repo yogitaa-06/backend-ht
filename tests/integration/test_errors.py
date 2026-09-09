@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi import FastAPI, Query
-from httpx2 import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
 from app.core.errors import ApplicationError

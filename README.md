@@ -7,7 +7,7 @@ the HireAndTech frontend.
 ## Current scope
 
 The current backend includes the production application foundation plus PostgreSQL
-persistence, authenticated access control, and IP security:
+persistence, authenticated access control, IP security, and secure resume management:
 
 - versioned FastAPI routing and a dependency-free health endpoint;
 - typed environment configuration with deployment-safety validation;
@@ -18,6 +18,7 @@ persistence, authenticated access control, and IP security:
 - Supabase JWT identity verification and local profile authorization;
 - trusted-proxy-aware IP allowlisting and append-oriented security auditing;
 - bounded route-specific rate limiting for authentication and security administration;
+- owner-scoped private resume upload, parsing, replacement, listing, and deletion;
 - unit and HTTP integration test foundations;
 - linting, strict type checking, coverage, and container configuration.
 
@@ -28,6 +29,7 @@ Queues and business domains remain deferred to their dedicated incremental phase
 - [Phase 2 — PostgreSQL Persistence Foundation](docs/phases/phase-02-persistence-foundation.md)
 - [Phase 3 — Authenticated User Access Control](docs/phases/phase-03-authenticated-access-control.md)
 - [Phase 4 — IP Security](docs/phases/phase-04-ip-security.md)
+- [Phase 5 — Secure Resume Management](docs/phases/phase-05-secure-resume-management.md)
 
 ## Architecture
 
@@ -78,6 +80,7 @@ Local URLs with the default port and API prefix:
 | Readiness | `http://127.0.0.1:8000/api/v1/health/ready` |
 | Current user (bearer token required) | `http://127.0.0.1:8000/api/v1/auth/me` |
 | IP security administration | `http://127.0.0.1:8000/api/v1/admin/security/ip/current` |
+| Resume management (bearer token required) | `http://127.0.0.1:8000/api/v1/resumes` |
 
 `GET /` returns public API metadata and relative docs/health links. It requires no
 authentication and performs no database, Supabase, or readiness checks. The docs
@@ -134,6 +137,10 @@ configuration template and fill its blank assignments before startup.
 | `HIREANDTECH_IP_ALLOWLIST_ENABLED` | Enforce persistent CIDR rules | `false` |
 | `HIREANDTECH_IP_ALLOWLIST_FAIL_CLOSED` | Deny on rule-store failure | `true` |
 | `HIREANDTECH_IP_EMERGENCY_BYPASS_CIDRS` | Configuration-only recovery networks | `[]` |
+| `HIREANDTECH_RESUME_STORAGE_BUCKET` | Private Supabase Storage bucket | `resumes` |
+| `HIREANDTECH_RESUME_MAX_SIZE_BYTES` | Maximum PDF bytes accepted | `5242880` |
+| `HIREANDTECH_RESUME_MAX_PAGES` | Maximum PDF pages parsed | `25` |
+| `HIREANDTECH_RESUME_MAX_EXTRACTED_CHARACTERS` | Maximum extracted characters requested | `200000` |
 
 Wildcard Host and CORS entries are rejected. Staging and production must provide
 explicit non-local allowlists. Secrets must be supplied through the deployment's
@@ -184,6 +191,26 @@ Phase 4 rate limits authentication and admin-security route groups using the tru
 resolved IP. Counters are capacity-bounded and per process. Multi-instance deployments
 can replace the injectable store with shared infrastructure in a future operational
 phase; Phase 4 does not introduce Redis or claim globally coordinated limits.
+
+## Secure resume management
+
+Authenticated profiles can upload, list, replace, inspect, and delete their own PDF
+resumes beneath `/api/v1/resumes`. Files remain in a private Supabase Storage bucket;
+public responses never include object keys, digests, extracted text, or raw parser
+output. The backend generates owner-scoped object keys and never accepts an owner ID
+from the request.
+
+Uploads are bounded by actual bytes, PDF MIME type and signature, safe filename rules,
+page count, and extracted-text size. Parsing is deterministic and offline. Although the
+configuration accepts a larger requested text limit for compatibility, the parser caps
+its effective limit at the public schema maximum of 200,000 characters.
+
+Database and storage changes use explicit compensation: failed upload/replacement
+transactions remove newly uploaded objects, replacement retires the old row only in the
+successful database transaction, and deletion commits the soft-delete before storage
+cleanup. Cleanup retries are idempotent. Duplicate SHA lookup remains owner-scoped
+repository support; Phase 5 does not reject duplicate uploads because that is not part
+of the public API contract.
 
 ## Error and logging contracts
 

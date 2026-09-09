@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from httpx2 import ASGITransport, AsyncClient, Response
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings

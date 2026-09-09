@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.routing import iter_route_contexts
-from httpx2 import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
 from app.main import create_app
@@ -25,15 +25,32 @@ def test_v1_routes_are_registered_before_startup(test_settings: Settings, prefix
     assert not paths["/"]["get"].get("security")
     assert str(application.url_path_for("get_root")) == "/"
 
-    for suffix, name in [
-        ("/auth/me", "get_me"),
-        ("/health", "health"),
-        ("/health/ready", "readiness"),
+    resume_id = "00000000-0000-0000-0000-000000000001"
+    for suffix, name, method, path_parameters in [
+        ("/auth/me", "get_me", "GET", {}),
+        ("/health", "health", "GET", {}),
+        ("/health/ready", "readiness", "GET", {}),
+        ("/resumes", "list_resumes", "GET", {}),
+        (
+            "/resumes/{resume_id}/profile",
+            "get_candidate_profile",
+            "GET",
+            {"resume_id": resume_id},
+        ),
+        (
+            "/resumes/{resume_id}/replace",
+            "replace_resume",
+            "POST",
+            {"resume_id": resume_id},
+        ),
+        ("/resumes/{resume_id}", "delete_resume", "DELETE", {"resume_id": resume_id}),
     ]:
         path = f"{prefix}{suffix}"
-        assert (path, "GET") in registered_routes
-        assert "get" in paths[path]
-        assert str(application.url_path_for(name)) == path
+        assert (path, method) in registered_routes
+        assert method.casefold() in paths[path]
+        assert str(application.url_path_for(name, **path_parameters)) == path.replace(
+            "{resume_id}", resume_id
+        )
 
 
 @pytest.mark.anyio

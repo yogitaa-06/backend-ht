@@ -22,6 +22,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -51,7 +52,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         """Own database resources and reject startup when connectivity is unavailable."""
         database = Database(application_settings)
+        http_client = httpx.AsyncClient()
+
         application.state.database = database
+        application.state.http_client = http_client
         try:
             logger.info(
                 "ip_allowlist_enabled"
@@ -63,7 +67,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise RuntimeError("Database is unavailable; API startup aborted")
             yield
         finally:
+            await http_client.aclose()
             await database.close()
+            application.state.http_client = None
             application.state.database = None
 
     expose_docs = application_settings.environment in {"local", "test"}

@@ -56,6 +56,29 @@ class Settings(BaseSettings):
         extra="ignore",
         hide_input_in_errors=True,
     )
+    # Resume security and parsing
+    resume_storage_bucket: str = Field(
+        default="resumes",
+        min_length=1,
+        max_length=63,
+        pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$",
+    )
+    resume_max_size_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1024,
+        le=25 * 1024 * 1024,
+    )
+    resume_max_pages: int = Field(default=25, ge=1, le=100)
+    resume_max_extracted_characters: int = Field(
+        default=200_000,
+        ge=1_000,
+        le=1_000_000,
+    )
+    resume_parser_version: str = Field(
+        default="deterministic-v1",
+        min_length=1,
+        max_length=64,
+    )
 
     # Application
     application_name: str = "HireAndTech API"
@@ -91,6 +114,7 @@ class Settings(BaseSettings):
     # Supabase authentication
     supabase_url: str | None = None
     supabase_jwt_audience: SupabaseJwtAudience = "authenticated"
+    supabase_secret_key: SecretStr | None = None
 
     @field_validator("trusted_proxy_cidrs", "ip_emergency_bypass_cidrs", mode="before")
     @classmethod

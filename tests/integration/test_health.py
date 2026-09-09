@@ -1,7 +1,7 @@
 """Integration tests for API liveness and edge security configuration."""
 
 import pytest
-from httpx2 import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
 from app.main import create_app

@@ -23,8 +23,9 @@ def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
 
     for arguments in (
         ("upgrade", "head"),
-        ("downgrade", "0002_profiles"),
+        ("downgrade", "0003_ip_security"),
         ("upgrade", "head"),
+        ("current",),
     ):
         result = subprocess.run(  # noqa: S603 - arguments are fixed test constants.
             [sys.executable, "-m", "alembic", *arguments],
@@ -35,3 +36,5 @@ def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
             check=False,
         )
         assert result.returncode == 0, f"Alembic {' '.join(arguments)} failed"
+        if arguments == ("current",):
+            assert "0004_resumes (head)" in result.stdout
