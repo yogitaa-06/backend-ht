@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     supabase_jwt_audience: SupabaseJwtAudience = "authenticated"
     supabase_secret_key: SecretStr | None = None
 
+    # Platform collection. The worker process consumes these settings; API
+    # requests never enqueue source-specific or user-specific scraping.
+    job_collection_enabled: bool = False
+    redis_url: SecretStr | None = None
+    dice_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    linkedin_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    glassdoor_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    job_collection_max_jobs_per_target: int = Field(default=100, ge=1, le=1000)
+
     @field_validator("trusted_proxy_cidrs", "ip_emergency_bypass_cidrs", mode="before")
     @classmethod
     def normalize_ip_networks(cls, value: object) -> object:
