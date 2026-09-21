@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, func, or_, select
@@ -13,8 +15,27 @@ from app.domain.jobs import GlobalJob
 from app.jobs.normalization import NormalizedJob
 
 
+class JobUpsertStatus(StrEnum):
+    INSERTED = "inserted"
+    UPDATED = "updated"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class JobUpsertResult:
+    job: GlobalJob
+    status: JobUpsertStatus
+
+
 class GlobalJobRepository:
     async def upsert(self, session: AsyncSession, job: NormalizedJob) -> GlobalJob:
+        """Compatibility wrapper returning the persisted job."""
+        return (await self.upsert_with_outcome(session, job)).job
+
+    async def upsert_with_outcome(
+        self, session: AsyncSession, job: NormalizedJob
+    ) -> JobUpsertResult:
+        """Insert, refresh, or update one source-identified canonical job."""
         existing = await session.scalar(
             select(GlobalJob).where(
                 GlobalJob.source == job.source, GlobalJob.external_job_id == job.external_job_id
@@ -47,11 +68,18 @@ class GlobalJobRepository:
         if existing is None:
             existing = GlobalJob(**values)
             session.add(existing)
+            status = JobUpsertStatus.INSERTED
+        elif existing.content_hash == job.content_hash:
+            existing.last_seen_at = now
+            existing.scraped_at = now
+            existing.is_active = True
+            status = JobUpsertStatus.SKIPPED
         else:
             for key, value in values.items():
                 setattr(existing, key, value)
+            status = JobUpsertStatus.UPDATED
         await session.flush()
-        return existing
+        return JobUpsertResult(existing, status)
 
     async def search(
         self,

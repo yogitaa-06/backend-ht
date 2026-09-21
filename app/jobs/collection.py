@@ -1,95 +1,87 @@
-"""Source-neutral collection contracts and non-overlapping scheduling."""
+"""Source-neutral job collection business orchestration."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.jobs.normalization import RawSourceJob, normalize_job
-from app.repositories.jobs import GlobalJobRepository
+from app.jobs.normalization import normalize_job
+from app.jobs.registry import JobSourceCollector
+from app.jobs.targets import CollectionTarget
+from app.repositories.jobs import GlobalJobRepository, JobUpsertStatus
 
 logger = logging.getLogger(__name__)
 
 
-class JobSourceCollector:
-    """Adapter contract implemented independently by Dice, LinkedIn, and Glassdoor."""
-
-    source: str
-
-    async def collect(self, target: str, *, max_jobs: int) -> Sequence[RawSourceJob]:
-        raise NotImplementedError
-
-
 @dataclass(frozen=True)
-class CollectionResult:
-    source: str
-    target: str
+class CoordinatorResult:
+    """Truthful persistence statistics from one collector invocation."""
+
     started_at: datetime
     finished_at: datetime
-    discovered: int
-    persisted: int
-    failed: int
+    jobs_discovered: int
+    jobs_normalized: int
+    jobs_inserted: int
+    jobs_updated: int
+    jobs_skipped: int
+    jobs_failed: int
+
+    @property
+    def duration_seconds(self) -> float:
+        return (self.finished_at - self.started_at).total_seconds()
 
 
 class CollectionCoordinator:
-    """Normalize and upsert one source run behind a caller-provided lock."""
+    """Collect, normalize, and persist jobs; queue and lock concerns live elsewhere."""
 
     def __init__(self, repository: GlobalJobRepository | None = None) -> None:
         self.repository = repository or GlobalJobRepository()
-        self._locks: dict[str, asyncio.Lock] = {}
 
     async def run(
-        self, session: AsyncSession, collector: JobSourceCollector, target: str, *, max_jobs: int
-    ) -> CollectionResult:
-        lock = self._locks.setdefault(collector.source, asyncio.Lock())
-        if lock.locked():
-            raise RuntimeError(f"collection already running for {collector.source}")
+        self,
+        session: AsyncSession,
+        collector: JobSourceCollector,
+        target: CollectionTarget,
+    ) -> CoordinatorResult:
         started = datetime.now(UTC)
-        async with lock:
-            raw_jobs = await collector.collect(target, max_jobs=max_jobs)
-            failed = 0
-            persisted = 0
-            for raw in raw_jobs:
-                try:
-                    await self.repository.upsert(session, normalize_job(raw))
-                    persisted += 1
-                except Exception:
-                    failed += 1
-                    logger.exception(
-                        "job_collection_item_failed",
-                        extra={"source": collector.source, "target": target},
-                    )
-            finished = datetime.now(UTC)
-            logger.info(
-                "job_collection_finished",
-                extra={
-                    "source": collector.source,
-                    "target": target,
-                    "started_at": started.isoformat(),
-                    "finished_at": finished.isoformat(),
-                    "jobs_discovered": len(raw_jobs),
-                    "jobs_updated_or_created": persisted,
-                    "failed_jobs": failed,
-                    "duration_seconds": (finished - started).total_seconds(),
-                },
-            )
-            return CollectionResult(
-                collector.source, target, started, finished, len(raw_jobs), persisted, failed
-            )
+        raw_jobs = await collector.collect(target)
+        normalized = inserted = updated = skipped = failed = 0
 
+        for raw in raw_jobs:
+            try:
+                if raw.source != target.source.value:
+                    raise ValueError("collector returned a job for a different source")
+                canonical = normalize_job(raw)
+                normalized += 1
+                async with session.begin_nested():
+                    outcome = await self.repository.upsert_with_outcome(session, canonical)
+                if outcome.status is JobUpsertStatus.INSERTED:
+                    inserted += 1
+                elif outcome.status is JobUpsertStatus.UPDATED:
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "job_collection_item_failed",
+                    extra={
+                        "source": target.source.value,
+                        "query": target.query,
+                        "location": target.location,
+                    },
+                )
 
-async def scheduled_collection_loop(
-    task: Callable[[], Awaitable[None]], interval_seconds: int, *, stop: asyncio.Event
-) -> None:
-    """Run a platform collection task on a configurable interval."""
-    while not stop.is_set():
-        await task()
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
+        return CoordinatorResult(
+            started_at=started,
+            finished_at=datetime.now(UTC),
+            jobs_discovered=len(raw_jobs),
+            jobs_normalized=normalized,
+            jobs_inserted=inserted,
+            jobs_updated=updated,
+            jobs_skipped=skipped,
+            jobs_failed=failed,
+        )

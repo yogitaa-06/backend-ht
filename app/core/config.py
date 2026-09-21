@@ -38,6 +38,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.urls import parse_database_url
+from app.jobs.targets import CollectionTarget, default_collection_targets
 
 Environment = Literal["local", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -123,10 +124,21 @@ class Settings(BaseSettings):
     # requests never enqueue source-specific or user-specific scraping.
     job_collection_enabled: bool = False
     redis_url: SecretStr | None = None
+    redis_connect_timeout_seconds: float = Field(default=5, gt=0, le=30)
     dice_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
     linkedin_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
     glassdoor_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
     job_collection_max_jobs_per_target: int = Field(default=100, ge=1, le=1000)
+    job_collection_lock_ttl_seconds: int = Field(default=900, ge=60, le=7200)
+    job_collection_task_timeout_seconds: int = Field(default=600, ge=30, le=3600)
+    job_collection_max_tries: int = Field(default=3, ge=1, le=10)
+    job_collection_queue_name: str = Field(default="hireandtech:jobs", min_length=1, max_length=100)
+    job_collection_redis_namespace: str = Field(
+        default="hireandtech", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9:_-]+$"
+    )
+    job_collection_targets: list[CollectionTarget] = Field(
+        default_factory=default_collection_targets
+    )
 
     @field_validator("trusted_proxy_cidrs", "ip_emergency_bypass_cidrs", mode="before")
     @classmethod
@@ -202,6 +214,27 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             raise ValueError("SUPABASE_SECRET_KEY must not be blank")
         return value
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def validate_redis_url(cls, value: object) -> object:
+        """Accept only Redis DSNs without ever exposing them in validation errors."""
+        if value == "" or value is None:
+            return None
+        if isinstance(value, SecretStr):
+            raw = value.get_secret_value()
+        elif isinstance(value, str):
+            raw = value
+        else:
+            raise ValueError("REDIS_URL must be a Redis connection URL")
+        parsed = urlsplit(raw)
+        if parsed.scheme not in {"redis", "rediss"} or not parsed.hostname or parsed.fragment:
+            raise ValueError("REDIS_URL must be a valid redis:// or rediss:// URL")
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("REDIS_URL must contain a valid port") from exc
+        return raw
 
     @property
     def supabase_jwt_issuer(self) -> str | None:
@@ -305,6 +338,11 @@ class Settings(BaseSettings):
 
         Non-local environments must explicitly configure Host and CORS allowlists.
         """
+        if self.job_collection_lock_ttl_seconds <= self.job_collection_task_timeout_seconds:
+            raise ValueError(
+                "JOB_COLLECTION_LOCK_TTL_SECONDS must exceed JOB_COLLECTION_TASK_TIMEOUT_SECONDS"
+            )
+
         if self.environment in {"staging", "production"}:
             if self.database_url is None:
                 raise ValueError("non-local environments require HIREANDTECH_DATABASE_URL")
