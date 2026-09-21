@@ -23,6 +23,8 @@ def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
 
     for arguments in (
         ("upgrade", "head"),
+        ("downgrade", "0004_resumes"),
+        ("upgrade", "head"),
         ("downgrade", "0003_ip_security"),
         ("upgrade", "head"),
         ("current",),
@@ -37,4 +39,4 @@ def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
         )
         assert result.returncode == 0, f"Alembic {' '.join(arguments)} failed"
         if arguments == ("current",):
-            assert "0004_resumes (head)" in result.stdout
+            assert "0005_phase5_hardening (head)" in result.stdout

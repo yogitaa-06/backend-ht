@@ -7,6 +7,7 @@ from fastapi import Depends, Request, status
 
 from app.core.config import Settings
 from app.core.errors import ApplicationError
+from app.resumes.execution import ResumeParseExecutor
 from app.resumes.parser import DeterministicPdfResumeParser
 from app.resumes.service import ResumeService
 from app.resumes.storage import SupabaseResumeStorage
@@ -36,9 +37,22 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
+def get_resume_parse_executor(request: Request) -> ResumeParseExecutor:
+    """Resolve the application-wide bounded parser execution boundary."""
+    executor = getattr(request.app.state, "resume_parse_executor", None)
+    if not isinstance(executor, ResumeParseExecutor):
+        raise ApplicationError(
+            "RESUME_PARSER_UNAVAILABLE",
+            "Resume parsing is temporarily unavailable.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return executor
+
+
 def get_resume_service(
     settings: Annotated[Settings, Depends(get_application_settings)],
     client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+    parse_executor: Annotated[ResumeParseExecutor, Depends(get_resume_parse_executor)],
 ) -> ResumeService:
     """Compose the resume service from validated application-owned dependencies."""
     supabase_url = settings.supabase_url
@@ -64,4 +78,5 @@ def get_resume_service(
         settings,
         storage=storage,
         parser=parser,
+        parse_executor=parse_executor,
     )

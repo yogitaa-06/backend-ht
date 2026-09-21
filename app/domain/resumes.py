@@ -78,6 +78,14 @@ class Resume(IdentityTimestampMixin, Base):
             name="resume_sha256_length",
         ),
         CheckConstraint(
+            "sha256 ~ '^[0-9a-f]{64}$'",
+            name="resume_sha256_lower_hex",
+        ),
+        CheckConstraint(
+            "char_length(btrim(original_filename)) > 0",
+            name="resume_filename_not_blank",
+        ),
+        CheckConstraint(
             "content_type = 'application/pdf'",
             name="resume_pdf_content_type",
         ),
@@ -89,6 +97,15 @@ class Resume(IdentityTimestampMixin, Base):
             """,
             name="resume_deleted_state_consistent",
         ),
+        CheckConstraint(
+            """
+            (status = 'parse_failed' AND parse_error_code IS NOT NULL)
+            OR
+            (status <> 'parse_failed' AND parse_error_code IS NULL)
+            """,
+            name="resume_parse_error_state_consistent",
+        ),
+        CheckConstraint("version > 0", name="resume_version_positive"),
         Index(
             "ix_resumes_owner_created_id",
             "owner_profile_id",
@@ -158,6 +175,7 @@ class Resume(IdentityTimestampMixin, Base):
     parse_error_code: Mapped[str | None] = mapped_column(
         String(64),
     )
+    version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
@@ -165,6 +183,7 @@ class Resume(IdentityTimestampMixin, Base):
         back_populates="resume",
         uselist=False,
     )
+    __mapper_args__ = {"version_id_col": version}  # noqa: RUF012 - SQLAlchemy mapper config
 
 
 class CandidateProfile(IdentityTimestampMixin, Base):
@@ -282,3 +301,24 @@ class CandidateProfile(IdentityTimestampMixin, Base):
         server_default=text("'{}'::jsonb"),
     )
     resume: Mapped[Resume] = relationship(back_populates="candidate_profile")
+
+
+class ResumeStorageCleanup(IdentityTimestampMixin, Base):
+    """Durable, private cleanup intent for cross-system storage consistency."""
+
+    __tablename__ = "resume_storage_cleanups"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="resume_cleanup_attempts_nonnegative"),
+        Index("ix_resume_storage_cleanups_available_at_id", "available_at", "id"),
+    )
+
+    owner_profile_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("hireandtech.profiles.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    storage_bucket: Mapped[str] = mapped_column(String(63), nullable=False)
+    storage_object_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    last_error_code: Mapped[str | None] = mapped_column(String(64))

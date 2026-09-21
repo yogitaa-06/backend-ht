@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast
@@ -11,6 +11,13 @@ from app.domain.security import IpAccessRule, SecurityAuditEvent
 
 
 class IpRuleRepository:
+    async def lock_mutations(self, session: AsyncSession) -> None:
+        """Serialize rule changes so concurrent requests cannot bypass lockout checks."""
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": 4_836_521_917},
+        )
+
     async def get(self, session: AsyncSession, rule_id: UUID) -> IpAccessRule | None:
         return await session.get(IpAccessRule, rule_id)
 

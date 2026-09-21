@@ -50,6 +50,16 @@ async def test_rule_get_and_get_by_cidr() -> None:
     assert await repository.get_by_cidr(database_session, expected.cidr) is expected
 
 
+async def test_rule_mutation_lock_uses_transaction_advisory_lock() -> None:
+    database_session = session()
+
+    await IpRuleRepository().lock_mutations(database_session)
+
+    statement, parameters = database_session.execute.await_args.args
+    assert str(statement) == "SELECT pg_advisory_xact_lock(:lock_id)"
+    assert parameters == {"lock_id": 4_836_521_917}
+
+
 async def test_rule_pages_and_enabled_list() -> None:
     database_session = session()
     expected = rule()

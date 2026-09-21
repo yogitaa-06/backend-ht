@@ -1,9 +1,23 @@
 """Unit tests for deployment-safety configuration invariants."""
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
+
+
+def _production_settings(**updates: object) -> Settings:
+    values: dict[str, object] = {
+        "_env_file": None,
+        "environment": "production",
+        "allowed_hosts": ["api.hireandtech.example"],
+        "cors_allowed_origins": ["https://hireandtech.example"],
+        "database_url": SecretStr("postgresql://application:password@database.example/hireandtech"),
+        "supabase_url": "https://example.supabase.co",
+        "supabase_secret_key": SecretStr("test-only-server-secret"),
+    }
+    values.update(updates)
+    return Settings(**values)  # type: ignore[arg-type]
 
 
 def test_local_defaults_are_valid() -> None:
@@ -49,18 +63,26 @@ def test_invalid_api_prefix_is_rejected() -> None:
 
 def test_production_rejects_local_network_defaults() -> None:
     with pytest.raises(ValidationError, match="require HIREANDTECH_ALLOWED_HOSTS"):
-        Settings(_env_file=None, environment="production")
+        _production_settings(allowed_hosts=["localhost", "127.0.0.1"])
 
 
 def test_production_accepts_explicit_network_configuration() -> None:
-    settings = Settings(
-        _env_file=None,
-        environment="production",
-        allowed_hosts=["api.hireandtech.example"],
-        cors_allowed_origins=["https://hireandtech.example"],
-    )
+    settings = _production_settings()
 
     assert settings.environment == "production"
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("database_url", "HIREANDTECH_DATABASE_URL"),
+        ("supabase_url", "HIREANDTECH_SUPABASE_URL"),
+        ("supabase_secret_key", "HIREANDTECH_SUPABASE_SECRET_KEY"),
+    ],
+)
+def test_production_requires_runtime_dependencies(field: str, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        _production_settings(**{field: None})
 
 
 def test_supabase_url_derives_authentication_endpoints() -> None:

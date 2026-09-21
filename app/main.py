@@ -31,11 +31,13 @@ from app import __version__
 from app.api.root import router as root_router
 from app.api.v1.router import router as v1_router
 from app.auth.verifier import SupabaseJwtVerifier
+from app.core.body_limit import ResumeRequestBodyLimitMiddleware
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import Database
+from app.resumes.execution import BoundedThreadResumeParseExecutor
 from app.security.ip import TrustedClientIpResolver
 from app.security.middleware import IpSecurityMiddleware
 from app.security.rate_limit import BoundedMemoryRateLimitStore, RouteRateLimiter
@@ -52,7 +54,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         """Own database resources and reject startup when connectivity is unavailable."""
         database = Database(application_settings)
-        http_client = httpx.AsyncClient()
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(10, connect=5),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
 
         application.state.database = database
         application.state.http_client = http_client
@@ -85,6 +90,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.supabase_jwt_verifier = SupabaseJwtVerifier(application_settings)
     rate_limit_store = BoundedMemoryRateLimitStore(application_settings.rate_limit_max_keys)
     application.state.rate_limit_store = rate_limit_store
+    application.state.resume_parse_executor = BoundedThreadResumeParseExecutor(
+        max_concurrency=application_settings.resume_max_concurrent_parses,
+        timeout_seconds=application_settings.resume_parse_timeout_seconds,
+    )
 
     application.add_middleware(
         CORSMiddleware,
@@ -104,6 +113,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rate_limiter=RouteRateLimiter(
             rate_limit_store, fail_closed=application_settings.rate_limit_fail_closed
         ),
+    )
+    application.add_middleware(
+        ResumeRequestBodyLimitMiddleware,
+        settings=application_settings,
     )
     application.add_middleware(RequestContextMiddleware)
 

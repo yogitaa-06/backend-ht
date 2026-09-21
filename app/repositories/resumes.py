@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.resumes import CandidateProfile, Resume, ResumeStatus
+from app.domain.resumes import CandidateProfile, Resume, ResumeStatus, ResumeStorageCleanup
 
 
 class ResumeRepository:
@@ -111,3 +112,42 @@ class CandidateProfileRepository:
             )
         )
         return result.scalar_one_or_none()
+
+
+class ResumeStorageCleanupRepository:
+    """Persistence operations for durable private-storage cleanup intents."""
+
+    async def add(self, session: AsyncSession, cleanup: ResumeStorageCleanup) -> None:
+        session.add(cleanup)
+
+    async def remove(self, session: AsyncSession, cleanup: ResumeStorageCleanup) -> None:
+        await session.delete(cleanup)
+
+    async def get_by_object_key(
+        self,
+        session: AsyncSession,
+        *,
+        object_key: str,
+    ) -> ResumeStorageCleanup | None:
+        result = await session.execute(
+            select(ResumeStorageCleanup).where(
+                ResumeStorageCleanup.storage_object_key == object_key
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_due_for_update(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> list[ResumeStorageCleanup]:
+        rows = await session.scalars(
+            select(ResumeStorageCleanup)
+            .where(ResumeStorageCleanup.available_at <= now)
+            .order_by(ResumeStorageCleanup.available_at, ResumeStorageCleanup.id)
+            .with_for_update(skip_locked=True)
+            .limit(limit)
+        )
+        return list(rows)

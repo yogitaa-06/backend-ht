@@ -10,11 +10,17 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.config import Settings
 from app.core.errors import ApplicationError
-from app.domain.resumes import CandidateProfile, Resume, ResumeStatus
-from app.repositories.resumes import CandidateProfileRepository, ResumeRepository
+from app.domain.resumes import CandidateProfile, Resume, ResumeStatus, ResumeStorageCleanup
+from app.repositories.resumes import (
+    CandidateProfileRepository,
+    ResumeRepository,
+    ResumeStorageCleanupRepository,
+)
+from app.resumes.execution import ResumeParseExecutor, ResumeParserExecutionError
 from app.resumes.parser import ResumeParser
 from app.resumes.service import ResumeService
 from app.resumes.storage import ResumeStorage, ResumeStorageError
@@ -76,6 +82,10 @@ def _dependencies() -> tuple[
     AsyncMock,
 ]:
     session = AsyncMock(spec=AsyncSession)
+    session.add = MagicMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = None
+    session.execute.return_value = execute_result
     storage = MagicMock(spec=ResumeStorage)
     storage.upload = AsyncMock()
     storage.delete = AsyncMock()
@@ -119,8 +129,8 @@ async def test_upload_stores_parses_and_commits_once() -> None:
     parser.parse.assert_called_once_with(upload.content)
     resumes.add.assert_awaited_once()
     profiles.add.assert_awaited_once()
-    session.flush.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    assert session.flush.await_count == 2
+    assert session.commit.await_count == 2
     session.rollback.assert_not_awaited()
     storage.delete.assert_not_awaited()
 
@@ -225,7 +235,7 @@ async def test_storage_failure_does_not_parse_or_touch_database() -> None:
     parser.parse.assert_not_called()
     resumes.add.assert_not_awaited()
     profiles.add.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    assert session.commit.await_count == 2
 
 
 @pytest.mark.anyio
@@ -261,8 +271,8 @@ async def test_parser_failure_is_persisted_as_safe_parse_failed_state() -> None:
     assert resume.parse_error_code == "RESUME_PDF_INVALID"
 
     profiles.add.assert_not_awaited()
-    session.flush.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    assert session.flush.await_count == 2
+    assert session.commit.await_count == 2
     session.rollback.assert_not_awaited()
     storage.delete.assert_not_awaited()
 
@@ -272,7 +282,7 @@ async def test_database_failure_rolls_back_and_deletes_uploaded_object() -> None
     session, storage, parser, resumes, profiles = _dependencies()
 
     database_error = RuntimeError("database failure")
-    session.commit.side_effect = database_error
+    session.commit.side_effect = [None, database_error, None]
 
     service = ResumeService(
         _settings(),
@@ -305,7 +315,7 @@ async def test_compensation_failure_does_not_replace_database_failure() -> None:
     session, storage, parser, resumes, profiles = _dependencies()
 
     database_error = RuntimeError("database failure")
-    session.commit.side_effect = database_error
+    session.commit.side_effect = [None, database_error, None]
     storage.delete.side_effect = ResumeStorageError("storage cleanup failure")
 
     service = ResumeService(
@@ -337,7 +347,7 @@ async def test_parser_failure_database_failure_also_compensates_storage() -> Non
         "The resume PDF could not be parsed.",
         status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
-    session.commit.side_effect = RuntimeError("database failure")
+    session.commit.side_effect = [None, RuntimeError("database failure"), None]
 
     service = ResumeService(
         _settings(),
@@ -435,7 +445,7 @@ async def test_delete_soft_deletes_before_removing_storage() -> None:
     assert resume.deleted_at.tzinfo is not None
 
     session.flush.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    assert session.commit.await_count == 2
     session.rollback.assert_not_awaited()
 
     storage.delete.assert_awaited_once_with(
@@ -570,8 +580,8 @@ async def test_delete_retry_only_retries_storage_cleanup() -> None:
 
     assert result is resume
 
-    session.flush.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    session.flush.assert_awaited_once()
+    assert session.commit.await_count == 2
     session.rollback.assert_not_awaited()
 
     storage.delete.assert_awaited_once_with(
@@ -666,8 +676,8 @@ async def test_replace_persists_new_resume_and_retires_old_resume() -> None:
     resumes.add.assert_awaited_once()
     profiles.add.assert_awaited_once()
 
-    session.flush.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    assert session.flush.await_count == 2
+    assert session.commit.await_count == 3
     session.rollback.assert_not_awaited()
 
     uploaded_key = storage.upload.await_args.kwargs["object_key"]
@@ -770,7 +780,7 @@ async def test_replace_storage_upload_failure_leaves_old_resume_untouched() -> N
     parser.parse.assert_not_called()
     resumes.add.assert_not_awaited()
     profiles.add.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    assert session.commit.await_count == 2
     storage.delete.assert_not_awaited()
 
 
@@ -824,7 +834,7 @@ async def test_replace_parser_failure_cleans_new_storage_and_keeps_old_resume() 
 
     resumes.add.assert_not_awaited()
     profiles.add.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    assert session.commit.await_count == 2
 
     new_key = storage.upload.await_args.kwargs["object_key"]
 
@@ -854,7 +864,7 @@ async def test_replace_database_failure_rolls_back_and_cleans_new_storage() -> N
     resumes.get_owned.return_value = current
 
     database_error = RuntimeError("database failure")
-    session.commit.side_effect = database_error
+    session.commit.side_effect = [None, database_error, None]
 
     service = ResumeService(
         _settings(),
@@ -929,7 +939,7 @@ async def test_replace_old_storage_cleanup_failure_does_not_rollback_committed_d
     assert current.status == ResumeStatus.DELETED
     assert current.deleted_at is not None
 
-    session.commit.assert_awaited_once()
+    assert session.commit.await_count == 2
     session.rollback.assert_not_awaited()
 
     storage.delete.assert_awaited_once_with(
@@ -1076,3 +1086,111 @@ async def test_get_candidate_profile_rejects_missing_profile() -> None:
         resume_id=resume_id,
         owner_profile_id=owner_profile_id,
     )
+
+
+@pytest.mark.anyio
+async def test_unexpected_parser_failure_returns_safe_error_and_compensates_storage() -> None:
+    session, storage, parser, resumes, profiles = _dependencies()
+    parse_executor = AsyncMock(spec=ResumeParseExecutor)
+    parse_executor.parse.side_effect = ResumeParserExecutionError("private parser detail")
+    cleanups = AsyncMock(spec=ResumeStorageCleanupRepository)
+    service = ResumeService(
+        _settings(),
+        storage=storage,
+        parser=parser,
+        parse_executor=parse_executor,
+        resumes=resumes,
+        candidate_profiles=profiles,
+        storage_cleanups=cleanups,
+    )
+
+    with pytest.raises(ApplicationError) as raised:
+        await service.upload(session, owner_profile_id=uuid4(), upload=_upload())
+
+    assert raised.value.code == "RESUME_PARSER_UNAVAILABLE"
+    assert raised.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert "private parser detail" not in raised.value.message
+    storage.delete.assert_awaited_once()
+    cleanups.remove.assert_awaited_once()
+    session.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_replace_optimistic_lock_conflict_returns_409_and_removes_new_object() -> None:
+    session, storage, parser, resumes, profiles = _dependencies()
+    owner_profile_id = uuid4()
+    current = Resume(
+        id=uuid4(),
+        owner_profile_id=owner_profile_id,
+        original_filename="old.pdf",
+        storage_bucket="resumes",
+        storage_object_key=f"{owner_profile_id}/{uuid4()}.pdf",
+        content_type="application/pdf",
+        size_bytes=10,
+        sha256="b" * 64,
+        status=ResumeStatus.PARSED,
+        parser_version="deterministic-v1",
+    )
+    resumes.get_owned.return_value = current
+    session.flush.side_effect = [None, StaleDataError("concurrent update")]
+    cleanups = AsyncMock(spec=ResumeStorageCleanupRepository)
+    service = ResumeService(
+        _settings(),
+        storage=storage,
+        parser=parser,
+        resumes=resumes,
+        candidate_profiles=profiles,
+        storage_cleanups=cleanups,
+    )
+
+    with pytest.raises(ApplicationError) as raised:
+        await service.replace(
+            session,
+            resume_id=current.id,
+            owner_profile_id=owner_profile_id,
+            upload=_upload(),
+        )
+
+    assert raised.value.code == "CONFLICT"
+    assert raised.value.status_code == status.HTTP_409_CONFLICT
+    session.rollback.assert_awaited_once()
+    replacement_key = storage.upload.await_args.kwargs["object_key"]
+    storage.delete.assert_awaited_once_with(object_key=replacement_key)
+
+
+@pytest.mark.anyio
+async def test_reconcile_storage_cleanups_removes_successes_and_records_failures() -> None:
+    session, storage, parser, resumes, profiles = _dependencies()
+    cleanups = AsyncMock(spec=ResumeStorageCleanupRepository)
+    successful = ResumeStorageCleanup(
+        owner_profile_id=uuid4(),
+        storage_bucket="resumes",
+        storage_object_key="owner/success.pdf",
+        available_at=datetime.now(UTC),
+        attempts=0,
+    )
+    failed = ResumeStorageCleanup(
+        owner_profile_id=uuid4(),
+        storage_bucket="resumes",
+        storage_object_key="owner/failure.pdf",
+        available_at=datetime.now(UTC),
+        attempts=0,
+    )
+    cleanups.list_due_for_update.return_value = [successful, failed]
+    storage.delete.side_effect = [None, ResumeStorageError("private provider detail")]
+    service = ResumeService(
+        _settings(),
+        storage=storage,
+        parser=parser,
+        resumes=resumes,
+        candidate_profiles=profiles,
+        storage_cleanups=cleanups,
+    )
+
+    removed, failures = await service.reconcile_storage_cleanups(session, limit=2)
+
+    assert (removed, failures) == (1, 1)
+    cleanups.remove.assert_awaited_once_with(session, successful)
+    assert failed.attempts == 1
+    assert failed.last_error_code == "RESUME_STORAGE_UNAVAILABLE"
+    session.commit.assert_awaited_once()

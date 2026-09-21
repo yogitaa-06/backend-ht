@@ -1,0 +1,48 @@
+name: Backend quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: hireandtech_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hireandtech_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      HIREANDTECH_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hireandtech_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.9"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app tests
+      - run: uv run pytest --cov=app --cov-report=term-missing
+      - run: git diff --check
+      - run: docker build --tag hireandtech-backend:test .

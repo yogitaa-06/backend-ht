@@ -3,6 +3,7 @@
 from ipaddress import ip_address, ip_network
 
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.security.ip import (
@@ -112,5 +113,10 @@ def test_non_local_security_failure_policies_must_fail_closed() -> None:
             environment="production",
             allowed_hosts=["api.example.com"],
             cors_allowed_origins=["https://example.com"],
+            database_url=SecretStr(
+                "postgresql://application:password@database.example/hireandtech"
+            ),
+            supabase_url="https://example.supabase.co",
+            supabase_secret_key=SecretStr("test-only-server-secret"),
             ip_allowlist_fail_closed=False,
         )

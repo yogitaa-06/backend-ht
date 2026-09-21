@@ -79,6 +79,8 @@ class Settings(BaseSettings):
         min_length=1,
         max_length=64,
     )
+    resume_parse_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    resume_max_concurrent_parses: int = Field(default=2, ge=1, le=16)
 
     # Application
     application_name: str = "HireAndTech API"
@@ -98,6 +100,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
     rate_limit_auth_requests: int = Field(default=30, ge=1, le=10_000)
     rate_limit_admin_security_requests: int = Field(default=60, ge=1, le=10_000)
+    rate_limit_resume_write_requests: int = Field(default=10, ge=1, le=10_000)
     rate_limit_max_keys: int = Field(default=10_000, ge=100, le=1_000_000)
 
     # PostgreSQL
@@ -180,6 +183,16 @@ class Settings(BaseSettings):
             raise ValueError("SUPABASE_URL must contain a valid port") from exc
 
         return normalized_value
+
+    @field_validator("supabase_secret_key", mode="before")
+    @classmethod
+    def normalize_supabase_secret(cls, value: object) -> object:
+        """Treat an empty local placeholder as unset and reject whitespace secrets."""
+        if value == "":
+            return None
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("SUPABASE_SECRET_KEY must not be blank")
+        return value
 
     @property
     def supabase_jwt_issuer(self) -> str | None:
@@ -284,6 +297,12 @@ class Settings(BaseSettings):
         Non-local environments must explicitly configure Host and CORS allowlists.
         """
         if self.environment in {"staging", "production"}:
+            if self.database_url is None:
+                raise ValueError("non-local environments require HIREANDTECH_DATABASE_URL")
+            if self.supabase_url is None:
+                raise ValueError("non-local environments require HIREANDTECH_SUPABASE_URL")
+            if self.supabase_secret_key is None:
+                raise ValueError("non-local environments require HIREANDTECH_SUPABASE_SECRET_KEY")
             if not self.ip_allowlist_fail_closed or not self.rate_limit_fail_closed:
                 raise ValueError("non-local security controls must fail closed")
             if self.allowed_hosts == [

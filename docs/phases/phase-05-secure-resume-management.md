@@ -31,14 +31,17 @@ parser output.
 
 ## Validation and deterministic parsing
 
-The upload boundary reads at most one byte beyond the configured maximum, always closes
-the upload stream, and validates the actual byte length, PDF MIME type, `.pdf` suffix,
-dangerous double extensions, and `%PDF-` signature. SHA-256 is calculated by the
-backend for private persistence.
+An early ASGI boundary limits the complete upload or replacement request before the
+multipart parser can buffer an unbounded body. The upload boundary then reads at most
+one file byte beyond the configured maximum, always closes the stream, and validates
+the actual byte length, PDF MIME type, `.pdf` suffix, dangerous double extensions, and
+`%PDF-` signature. SHA-256 is calculated by the backend for private persistence.
 
-The parser performs no network or AI calls. It enforces the configured page bound and
-caps extracted text at `min(HIREANDTECH_RESUME_MAX_EXTRACTED_CHARACTERS, 200000)` so
-parser output can always satisfy the `ParsedResume` schema.
+The parser performs no network or AI calls. Parsing runs off the async event loop with
+a shared concurrency bound and request deadline. A timed-out worker retains its slot
+until the underlying thread actually finishes. It enforces the configured page bound,
+caps extracted text at `min(HIREANDTECH_RESUME_MAX_EXTRACTED_CHARACTERS, 200000)`, and
+validates bounded structured output before persistence.
 
 ## Persistence and compensation
 
@@ -47,12 +50,27 @@ parser output can always satisfy the `ParsedResume` schema.
 and raw parser output. Composite ownership and uniqueness constraints keep candidate
 profiles bound to exactly one resume owned by the same profile.
 
-- Upload storage succeeds before database persistence. A database failure rolls back
-  and best-effort deletes the new object. A safe parser failure is persisted on upload.
+- Before a new storage write, the database commits a delayed cleanup intent. Successful
+  persistence removes it atomically; compensation removes it only after storage deletion
+  succeeds. This prevents storage failures from silently orphaning objects.
+- Upload storage succeeds before resume persistence. A database failure rolls back and
+  compensates the new object. A safe parser failure is persisted on upload.
 - Replacement uploads and parses first, then inserts the replacement and profile while
   soft-deleting the old row in one transaction. Old storage is removed only afterward.
 - Deletion commits the soft-delete before storage removal. Retrying a deleted resume
   retries only idempotent storage cleanup.
+
+Resume rows use optimistic versioning so concurrent replacement/deletion cannot silently
+overwrite a newer state. Storage-cleanup rows are processed with `FOR UPDATE SKIP LOCKED`
+so multiple operator jobs can safely run. Schedule the following command after applying
+the Phase 5 hardening migration:
+
+```powershell
+uv run python -m app.resumes.reconcile
+```
+
+The command processes a bounded batch, logs counts only, and retains failed intents for
+a later retry.
 
 The owner-scoped SHA-256 repository lookup remains available, but duplicate uploads are
 not rejected because duplicate prevention is not part of the Phase 5 public contract.

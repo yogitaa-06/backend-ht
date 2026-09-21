@@ -16,7 +16,8 @@ socket peer / trusted X-Forwarded-For resolution
 
 `OPTIONS`, `/api/v1/health`, and `/api/v1/health/ready` are the only enforcement
 exclusions. They preserve CORS negotiation, liveness, and readiness. Rate limiting is
-applied only to authentication and administrator-security routes.
+applied to authentication and administrator-security routes; Phase 5 also applies the
+same infrastructure to resume upload and replacement writes.
 
 ## Trusted proxy assumptions
 
@@ -79,5 +80,6 @@ did not previously use Redis.
 Limits are configured with `HIREANDTECH_RATE_LIMIT_ENABLED`,
 `HIREANDTECH_RATE_LIMIT_WINDOW_SECONDS`, `HIREANDTECH_RATE_LIMIT_AUTH_REQUESTS`,
 `HIREANDTECH_RATE_LIMIT_ADMIN_SECURITY_REQUESTS`, and
-`HIREANDTECH_RATE_LIMIT_MAX_KEYS`. `HIREANDTECH_RATE_LIMIT_FAIL_CLOSED` defaults to
+`HIREANDTECH_RATE_LIMIT_MAX_KEYS`. Phase 5 adds
+`HIREANDTECH_RATE_LIMIT_RESUME_WRITE_REQUESTS`. `HIREANDTECH_RATE_LIMIT_FAIL_CLOSED` defaults to
 `true` and cannot be disabled in staging or production.

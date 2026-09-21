@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     StringConstraints,
     field_validator,
 )
@@ -20,9 +21,21 @@ from app.domain.resumes import ResumeStatus
 MAX_EXTRACTED_TEXT_CHARACTERS = 200_000
 
 
-NormalizedText = Annotated[
+ShortText = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1),
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+]
+EmailText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=320),
+]
+PhoneText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+]
+LongText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000),
 ]
 
 
@@ -35,22 +48,22 @@ class ResumeSchema(BaseModel):
 class EmploymentEntry(ResumeSchema):
     """Normalized employment entry extracted from a resume."""
 
-    company: NormalizedText | None = None
-    title: NormalizedText | None = None
-    location: NormalizedText | None = None
-    start_date: NormalizedText | None = None
-    end_date: NormalizedText | None = None
-    description: NormalizedText | None = None
+    company: ShortText | None = None
+    title: ShortText | None = None
+    location: ShortText | None = None
+    start_date: ShortText | None = None
+    end_date: ShortText | None = None
+    description: LongText | None = None
 
 
 class EducationEntry(ResumeSchema):
     """Normalized education entry extracted from a resume."""
 
-    institution: NormalizedText | None = None
-    qualification: NormalizedText | None = None
-    field_of_study: NormalizedText | None = None
-    start_date: NormalizedText | None = None
-    end_date: NormalizedText | None = None
+    institution: ShortText | None = None
+    qualification: ShortText | None = None
+    field_of_study: ShortText | None = None
+    start_date: ShortText | None = None
+    end_date: ShortText | None = None
 
 
 def _normalize_string_list(values: list[str]) -> list[str]:
@@ -76,12 +89,12 @@ def _normalize_string_list(values: list[str]) -> list[str]:
 class ParsedResume(ResumeSchema):
     """Deterministic parser output before persistence."""
 
-    full_name: NormalizedText | None = None
-    email: NormalizedText | None = None
-    phone: NormalizedText | None = None
-    location: NormalizedText | None = None
-    current_title: NormalizedText | None = None
-    professional_summary: NormalizedText | None = None
+    full_name: ShortText | None = None
+    email: EmailText | None = None
+    phone: PhoneText | None = None
+    location: ShortText | None = None
+    current_title: ShortText | None = None
+    professional_summary: LongText | None = None
     years_of_experience: Decimal | None = Field(
         default=None,
         ge=Decimal("0"),
@@ -95,18 +108,18 @@ class ParsedResume(ResumeSchema):
             max_length=MAX_EXTRACTED_TEXT_CHARACTERS,
         ),
     ]
-    skills: list[str] = Field(default_factory=list)
-    employment_history: list[EmploymentEntry] = Field(default_factory=list)
-    education: list[EducationEntry] = Field(default_factory=list)
-    certifications: list[str] = Field(default_factory=list)
-    languages: list[str] = Field(default_factory=list)
-    raw_parser_output: dict[str, Any] = Field(default_factory=dict)
+    skills: list[ShortText] = Field(default_factory=list, max_length=500)
+    employment_history: list[EmploymentEntry] = Field(default_factory=list, max_length=200)
+    education: list[EducationEntry] = Field(default_factory=list, max_length=100)
+    certifications: list[ShortText] = Field(default_factory=list, max_length=200)
+    languages: list[ShortText] = Field(default_factory=list, max_length=100)
+    raw_parser_output: dict[str, JsonValue] = Field(default_factory=dict, max_length=100)
 
     @field_validator(
         "skills",
         "certifications",
         "languages",
-        mode="after",
+        mode="before",
     )
     @classmethod
     def normalize_string_lists(cls, values: list[str]) -> list[str]:
@@ -141,22 +154,22 @@ class CandidateProfileResponse(ResumeSchema):
 
     id: UUID
     resume_id: UUID
-    full_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    location: str | None = None
-    current_title: str | None = None
-    professional_summary: str | None = None
+    full_name: ShortText | None = None
+    email: EmailText | None = None
+    phone: PhoneText | None = None
+    location: ShortText | None = None
+    current_title: ShortText | None = None
+    professional_summary: LongText | None = None
     years_of_experience: Decimal | None = Field(
         default=None,
         ge=Decimal("0"),
         le=Decimal("80"),
     )
-    skills: list[str] = Field(default_factory=list)
-    employment_history: list[EmploymentEntry] = Field(default_factory=list)
-    education: list[EducationEntry] = Field(default_factory=list)
-    certifications: list[str] = Field(default_factory=list)
-    languages: list[str] = Field(default_factory=list)
+    skills: list[ShortText] = Field(default_factory=list, max_length=500)
+    employment_history: list[EmploymentEntry] = Field(default_factory=list, max_length=200)
+    education: list[EducationEntry] = Field(default_factory=list, max_length=100)
+    certifications: list[ShortText] = Field(default_factory=list, max_length=200)
+    languages: list[ShortText] = Field(default_factory=list, max_length=100)
     created_at: datetime
     updated_at: datetime
 

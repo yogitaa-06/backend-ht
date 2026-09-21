@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from app.domain.resumes import CandidateProfile, Resume
+from app.domain.resumes import CandidateProfile, Resume, ResumeStorageCleanup
 from app.repositories.resumes import (
     CandidateProfileRepository,
     ResumeRepository,
+    ResumeStorageCleanupRepository,
 )
 
 
@@ -210,6 +213,44 @@ async def test_candidate_profile_add_stages_supplied_model() -> None:
     await repository.add(session, profile)
 
     session.add.assert_called_once_with(profile)
+
+
+@pytest.mark.anyio
+async def test_cleanup_batch_is_due_ordered_bounded_and_locked() -> None:
+    session = _mock_session()
+    rows = MagicMock()
+    rows.__iter__.return_value = iter([])
+    session.scalars.return_value = rows
+
+    result = await ResumeStorageCleanupRepository().list_due_for_update(
+        session,
+        now=datetime.now(UTC),
+        limit=25,
+    )
+
+    assert result == []
+    statement = session.scalars.await_args.args[0]
+    statement_text = str(
+        statement.compile(dialect=postgresql.dialect())  # type: ignore[no-untyped-call]
+    ).lower()
+    assert "resume_storage_cleanups.available_at <=" in statement_text
+    assert "order by" in statement_text
+    assert "limit" in statement_text
+    assert "for update" in statement_text
+    assert "skip locked" in statement_text
+
+
+@pytest.mark.anyio
+async def test_cleanup_add_and_remove_stage_supplied_model() -> None:
+    session = _mock_session()
+    repository = ResumeStorageCleanupRepository()
+    cleanup = MagicMock(spec=ResumeStorageCleanup)
+
+    await repository.add(session, cleanup)
+    await repository.remove(session, cleanup)
+
+    session.add.assert_called_once_with(cleanup)
+    session.delete.assert_awaited_once_with(cleanup)
 
 
 def test_repository_public_lookup_methods_require_owner_argument() -> None:

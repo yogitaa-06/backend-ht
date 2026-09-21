@@ -132,7 +132,7 @@ class IpSecurityMiddleware:
     ) -> ApplicationError | None:
         if not self.settings.rate_limit_enabled or excluded:
             return None
-        policy = self._rate_policy(request.url.path)
+        policy = self._rate_policy(request.method, request.url.path)
         if policy is None:
             return None
         route_group, limit = policy
@@ -158,12 +158,18 @@ class IpSecurityMiddleware:
             )
         return None
 
-    def _rate_policy(self, path: str) -> tuple[str, int] | None:
+    def _rate_policy(self, method: str, path: str) -> tuple[str, int] | None:
         prefix = self.settings.api_v1_prefix
         if path.startswith(f"{prefix}/admin/security"):
             return "admin-security", self.settings.rate_limit_admin_security_requests
         if path.startswith(f"{prefix}/auth"):
             return "authentication", self.settings.rate_limit_auth_requests
+        resumes_path = f"{prefix}/resumes"
+        if method == "POST" and (
+            path == resumes_path
+            or (path.startswith(f"{resumes_path}/") and path.endswith("/replace"))
+        ):
+            return "resume-write", self.settings.rate_limit_resume_write_requests
         return None
 
     @staticmethod

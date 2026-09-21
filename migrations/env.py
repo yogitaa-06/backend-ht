@@ -18,7 +18,7 @@ from app.core.logging import configure_logging
 from app.db.base import SCHEMA, Base
 from app.db.session import create_database_engine
 from app.domain.profiles import Profile
-from app.domain.resumes import CandidateProfile, Resume
+from app.domain.resumes import CandidateProfile, Resume, ResumeStorageCleanup
 from app.domain.security import IpAccessRule, SecurityAuditEvent
 
 _ = (
@@ -27,6 +27,7 @@ _ = (
     SecurityAuditEvent,
     Resume,
     CandidateProfile,
+    ResumeStorageCleanup,
 )
 
 

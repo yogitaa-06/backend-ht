@@ -2,6 +2,7 @@
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from app.core.config import Environment, Settings
 from app.main import create_app
@@ -32,6 +33,9 @@ async def test_root_links_respect_configuration_and_docs_policy(environment: Env
         cors_allowed_origins=["http://testserver"],
         application_name="Public API",
         api_v1_prefix="/internal/v1",
+        database_url=SecretStr("postgresql://application:password@database.example/hireandtech"),
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key=SecretStr("test-only-server-secret"),
     )
     application = create_app(settings)
     async with AsyncClient(

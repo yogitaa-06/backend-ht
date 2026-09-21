@@ -87,6 +87,7 @@ async def test_create_rule_records_actor_and_audit_in_one_commit() -> None:
     assert audit.event_type is SecurityAuditEventType.IP_RULE_CREATED
     assert audit.actor_user_id == actor.id
     assert audit.user_agent == "agentsafe"
+    rules.lock_mutations.assert_awaited_once_with(database_session)
     database_session.commit.assert_awaited_once()
 
 

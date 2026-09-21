@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from sqlalchemy import Table
 
-from app.domain.resumes import CandidateProfile, Resume, ResumeStatus
+from app.domain.resumes import CandidateProfile, Resume, ResumeStatus, ResumeStorageCleanup
 
 
 def test_resume_model_uses_private_schema_and_ownership() -> None:
@@ -47,6 +47,23 @@ def test_resume_declares_security_and_integrity_constraints() -> None:
     assert "ck_resumes_resume_sha256_length" in constraint_names
     assert "ck_resumes_resume_pdf_content_type" in constraint_names
     assert "ck_resumes_resume_deleted_state_consistent" in constraint_names
+    assert "ck_resumes_resume_sha256_lower_hex" in constraint_names
+    assert "ck_resumes_resume_filename_not_blank" in constraint_names
+    assert "ck_resumes_resume_parse_error_state_consistent" in constraint_names
+    assert "ck_resumes_resume_version_positive" in constraint_names
+    assert Resume.__mapper__.version_id_col is table.c.version
+
+
+def test_storage_cleanup_is_private_durable_and_owner_bound() -> None:
+    table = cast(Table, ResumeStorageCleanup.__table__)
+
+    assert table.schema == "hireandtech"
+    assert table.c.storage_object_key.unique
+    assert table.c.available_at.nullable is False
+    assert table.c.attempts.nullable is False
+    owner_foreign_key = next(iter(table.c.owner_profile_id.foreign_keys))
+    assert owner_foreign_key.target_fullname == "hireandtech.profiles.id"
+    assert owner_foreign_key.ondelete == "RESTRICT"
 
 
 def test_candidate_profile_is_one_to_one_with_resume() -> None:

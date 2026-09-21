@@ -105,6 +105,7 @@ class IpSecurityService:
         description: str | None,
         enabled: bool,
     ) -> IpAccessRule:
+        await self.rules.lock_mutations(session)
         normalized = str(normalize_network(cidr))
         if await self.rules.get_by_cidr(session, normalized) is not None:
             raise _conflict("An IP rule for this network already exists.")
@@ -145,6 +146,7 @@ class IpSecurityService:
         enabled: bool | None,
         current_ip: IpAddress | None,
     ) -> IpAccessRule:
+        await self.rules.lock_mutations(session)
         rule = await self._get_rule(session, rule_id)
         next_cidr = str(normalize_network(cidr)) if cidr is not None else str(rule.cidr)
         if next_cidr != str(rule.cidr):
@@ -194,6 +196,7 @@ class IpSecurityService:
         *,
         current_ip: IpAddress | None,
     ) -> None:
+        await self.rules.lock_mutations(session)
         rule = await self._get_rule(session, rule_id)
         await self._guard_lockout(
             session,

@@ -2,6 +2,7 @@
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.main import create_app
@@ -71,6 +72,9 @@ async def test_production_disables_interactive_api_documentation() -> None:
         environment="production",
         allowed_hosts=["api.hireandtech.example"],
         cors_allowed_origins=["https://hireandtech.example"],
+        database_url=SecretStr("postgresql://application:password@database.example/hireandtech"),
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key=SecretStr("test-only-server-secret"),
     )
     transport = ASGITransport(app=create_app(settings))
     async with AsyncClient(

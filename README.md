@@ -141,6 +141,9 @@ configuration template and fill its blank assignments before startup.
 | `HIREANDTECH_RESUME_MAX_SIZE_BYTES` | Maximum PDF bytes accepted | `5242880` |
 | `HIREANDTECH_RESUME_MAX_PAGES` | Maximum PDF pages parsed | `25` |
 | `HIREANDTECH_RESUME_MAX_EXTRACTED_CHARACTERS` | Maximum extracted characters requested | `200000` |
+| `HIREANDTECH_RESUME_PARSE_TIMEOUT_SECONDS` | Per-request parser deadline | `10` |
+| `HIREANDTECH_RESUME_MAX_CONCURRENT_PARSES` | Per-process parser worker bound | `2` |
+| `HIREANDTECH_RATE_LIMIT_RESUME_WRITE_REQUESTS` | Upload/replace requests per client window | `10` |
 
 Wildcard Host and CORS entries are rejected. Staging and production must provide
 explicit non-local allowlists. Secrets must be supplied through the deployment's
@@ -205,10 +208,13 @@ page count, and extracted-text size. Parsing is deterministic and offline. Altho
 configuration accepts a larger requested text limit for compatibility, the parser caps
 its effective limit at the public schema maximum of 200,000 characters.
 
-Database and storage changes use explicit compensation: failed upload/replacement
+Database and storage changes use durable compensation intents: failed upload/replacement
 transactions remove newly uploaded objects, replacement retires the old row only in the
 successful database transaction, and deletion commits the soft-delete before storage
-cleanup. Cleanup retries are idempotent. Duplicate SHA lookup remains owner-scoped
+cleanup. Cleanup retries are idempotent and can be processed by running
+`uv run python -m app.resumes.reconcile` from a scheduler. Resume writes use optimistic
+versioning, while PDF parsing has an off-event-loop concurrency bound and deadline.
+Duplicate SHA lookup remains owner-scoped
 repository support; Phase 5 does not reject duplicate uploads because that is not part
 of the public API contract.
 
@@ -235,3 +241,8 @@ docker run --rm -p 8000:8000 --env-file .env hireandtech-backend
 For staging and production, disable public access to `/docs`, terminate TLS at trusted
 infrastructure, configure explicit public Host and frontend-origin values, and keep
 trusted-proxy CIDRs synchronized with the direct application network path.
+
+The image contains `alembic.ini` and migrations but does not mutate the database at API
+startup. Deployments must run `uv run alembic upgrade head` as a separate release step
+against the intended non-production or production database, then start the API. See the
+[Phase 5 deployment checklist](docs/deployment-phase-05.md).

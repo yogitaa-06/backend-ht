@@ -87,6 +87,12 @@ def build_app(
     app.add_api_route("/private", lambda: {"ok": True})
     app.add_api_route("/api/v1/auth/me", lambda: {"ok": True})
     app.add_api_route("/api/v1/admin/security/ip-rules", lambda: {"ok": True})
+    app.add_api_route("/api/v1/resumes", lambda: {"ok": True}, methods=["POST"])
+    app.add_api_route(
+        "/api/v1/resumes/{resume_id}/replace",
+        lambda: {"ok": True},
+        methods=["POST"],
+    )
     app.add_api_route("/api/v1/health", lambda: {"status": "ok"})
     app.add_api_route("/api/v1/health/ready", lambda: {"status": "ready"})
     app.add_middleware(
@@ -278,6 +284,37 @@ async def test_admin_security_route_limit_returns_429_with_retry_after(
 
     first = await request(app, path="/api/v1/admin/security/ip-rules")
     second = await request(app, path="/api/v1/admin/security/ip-rules")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["error"]["code"] == "RATE_LIMITED"
+    assert second.headers["Retry-After"] == "60"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/resumes",
+        "/api/v1/resumes/00000000-0000-0000-0000-000000000000/replace",
+    ],
+)
+async def test_resume_write_limit_returns_429_with_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    rules = FakeRuleRepository(True)
+    app, database = build_app(
+        settings(
+            ip_allowlist_enabled=False,
+            rate_limit_enabled=True,
+            rate_limit_resume_write_requests=1,
+        ),
+        rules,
+    )
+    monkeypatch.setattr("app.security.middleware.get_database", lambda _: database)
+
+    first = await request(app, path=path, method="POST")
+    second = await request(app, path=path, method="POST")
 
     assert first.status_code == 200
     assert second.status_code == 429
