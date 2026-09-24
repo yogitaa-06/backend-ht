@@ -27,30 +27,16 @@ async def test_linkedin_collector_parses_structured_job() -> None:
     html = """
     <html>
       <body>
-        <script type="application/ld+json">
-        {
-          "@context": "http://schema.org",
-          "@type": "JobPosting",
-          "title": "Python Developer",
-          "url": "https://www.linkedin.com/jobs/view/123456789",
-          "datePosted": "2026-09-22T10:00:00.000Z",
-          "description": "Requires 2-4 years of experience.",
-          "employmentType": ["FULL_TIME"],
-          "hiringOrganization": {
-            "@type": "Organization",
-            "name": "Example Tech"
-          },
-          "jobLocation": {
-            "@type": "Place",
-            "address": {
-              "@type": "PostalAddress",
-              "addressLocality": "Austin",
-              "addressRegion": "TX",
-              "addressCountry": "US"
-            }
-          }
-        }
-        </script>
+        <h2 class="top-card-layout__title">Python Developer</h2>
+        <a class="topcard__org-name-link">Example Tech</a>
+        <span class="topcard__flavor topcard__flavor--bullet">Austin, TX, US</span>
+        <div class="show-more-less-html__markup">Requires 2-4 years of experience.</div>
+        <ul>
+            <li class="description__job-criteria-item">
+                <h3 class="description__job-criteria-subheader">Employment type</h3>
+                <span class="description__job-criteria-text">FULL_TIME</span>
+            </li>
+        </ul>
       </body>
     </html>
     """
@@ -82,30 +68,32 @@ async def test_linkedin_collector_parses_structured_job() -> None:
     assert job.title == "Python Developer"
     assert job.company == "Example Tech"
     assert job.location == "Austin, TX, US"
-    assert job.url == "https://www.linkedin.com/jobs/view/123456789"
+    assert job.url == "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123456789"
     assert job.description == "Requires 2-4 years of experience."
     assert job.employment_type == "FULL_TIME"
     assert job.remote is None
-    assert job.posted_at is not None
-    assert job.raw_data["url"] == "https://www.linkedin.com/jobs/view/123456789"
+    assert job.posted_at is None
+    assert "body" in job.raw_data
 
 
 @pytest.mark.anyio
-async def test_linkedin_collector_deduplicates_results() -> None:
+async def test_linkedin_collector_deduplicates_results(caplog: pytest.LogCaptureFixture) -> None:
     html = """
     <html>
       <body>
         <ul class="jobs-search__results-list">
-          <li>
-            <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/123456789">
-              Python Developer
-            </a>
-          </li>
-          <li>
-            <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/123456789">
-              Python Developer
-            </a>
-          </li>
+          <!-- Case 1: Plain ID -->
+          <li><a class="base-card__full-link" href="/jobs/view/4419969671">Job 1</a></li>
+          <!-- Case 2: Slug with ID -->
+          <li><a class="base-card__full-link" href="/jobs/view/senior-software-engineer-at-company-4419969671">Job 2</a></li>
+          <!-- Case 3: Absolute URL with query params -->
+          <li><a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/software-engineer-at-company-4419969671?position=2&pageNum=0">Job 3</a></li>
+          <!-- Case 4: Query parameter shouldn't become ID -->
+          <li><a class="base-card__full-link" href="/jobs/view/some-job-4419969672?position=2">Job 4</a></li>
+          <!-- Case 5: Malformed URL without valid trailing ID -->
+          <li><a class="base-card__full-link" href="/jobs/view/bad-url-no-id">Job 5</a></li>
+          <!-- Deduplication: same ID as Job 1 -->
+          <li><a class="base-card__full-link" href="/jobs/view/duplicate-job-4419969671">Duplicate</a></li>
         </ul>
       </body>
     </html>
@@ -125,8 +113,16 @@ async def test_linkedin_collector_deduplicates_results() -> None:
         )
         jobs = await collector.discover(_target())
 
-    assert len(jobs) == 1
-    assert jobs[0].external_job_id == "123456789"
+    # ID extracted should be 4419969671 and 4419969672.
+    assert len(jobs) == 2
+    assert jobs[0].external_job_id == "4419969671"
+    assert jobs[0].url == "https://www.linkedin.com/jobs/view/4419969671"
+    
+    assert jobs[1].external_job_id == "4419969672"
+    assert jobs[1].url == "https://www.linkedin.com/jobs/view/some-job-4419969672"
+    
+    # Check warning for malformed
+    assert "linkedin_invalid_job_url_skipped" in caplog.text
 
 
 @pytest.mark.anyio

@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     job_collection_redis_namespace: str = Field(
         default="hireandtech", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9:_-]+$"
     )
+    job_collection_proxy_url: SecretStr | None = None
     job_collection_targets: list[CollectionTarget] = Field(
         default_factory=default_collection_targets
     )
@@ -234,6 +235,23 @@ class Settings(BaseSettings):
             _ = parsed.port
         except ValueError as exc:
             raise ValueError("REDIS_URL must contain a valid port") from exc
+        return raw
+
+    @field_validator("job_collection_proxy_url", mode="before")
+    @classmethod
+    def validate_proxy_url(cls, value: object) -> object:
+        """Validate proxy URLs without exposing credentials in logs."""
+        if value == "" or value is None:
+            return None
+        if isinstance(value, SecretStr):
+            raw = value.get_secret_value()
+        elif isinstance(value, str):
+            raw = value
+        else:
+            raise ValueError("PROXY_URL must be a string")
+        parsed = urlsplit(raw)
+        if parsed.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed.hostname:
+            raise ValueError("PROXY_URL must be a valid proxy URL (http, https, socks5)")
         return raw
 
     @property

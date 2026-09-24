@@ -6,16 +6,15 @@ This module contains LinkedIn-specific HTTP and parsing behavior only.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
+from app.core.config import Settings, get_settings
 from app.domain.jobs import JobSource
 from app.jobs.errors import (
     SourceBlockedError,
@@ -24,6 +23,7 @@ from app.jobs.errors import (
 )
 from app.jobs.normalization import DiscoveredSourceJob, RawSourceJob
 from app.jobs.targets import CollectionTarget
+from app.jobs.transport import build_collection_client
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,10 @@ class LinkedInCollector:
         *,
         client: httpx.AsyncClient | None = None,
         request_delay_seconds: float = _REQUEST_DELAY_SECONDS,
+        settings: Settings | None = None,
     ) -> None:
         self._client = client
+        self._settings = settings or get_settings()
         self._request_delay_seconds = request_delay_seconds
 
     async def collect(
@@ -189,6 +191,7 @@ class LinkedInCollector:
                 detailed_job = self._parse_job_detail(
                     response.text,
                     expected_external_job_id=candidate.external_job_id,
+                    job_url=candidate.url,
                 )
                 if detailed_job is None:
                     logger.warning(
@@ -207,21 +210,7 @@ class LinkedInCollector:
 
     def _build_client(self) -> httpx.AsyncClient:
         """Create the HTTP client used for LinkedIn requests."""
-        return httpx.AsyncClient(
-            timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
-            follow_redirects=True,
-            headers={
-                "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-            },
-        )
+        return build_collection_client(self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 
     async def _fetch_search_page(
         self,
@@ -306,32 +295,42 @@ class LinkedInCollector:
         """Parse LinkedIn search HTML into discovered jobs."""
         jobs: list[DiscoveredSourceJob] = []
 
-        # Find <li> elements containing job links
+        # Find <a> elements containing job links
         link_pattern = re.compile(
-            r'<a[^>]+href=["\']'
-            r'(?P<url>[^"\']*/jobs/view/(?P<id>\d+)[^"\']*)'
-            r'["\'][^>]*>'
-            r"(?P<content>.*?)</a>",
+            r'<a[^>]+href=["\']([^"\']*/jobs/view/[^"\']*)["\'][^>]*>(.*?)</a>',
             re.IGNORECASE | re.DOTALL,
         )
 
         tag_pattern = re.compile(r"<[^>]+>")
 
         for match in link_pattern.finditer(body):
-            url = match.group("url")
-            external_id = match.group("id")
+            raw_url = match.group(1)
+            raw_content = match.group(2)
 
-            if not external_id:
+            parsed_url = urlparse(raw_url)
+            
+            # The ID must be at the end of the pathname
+            # e.g., /jobs/view/software-engineer-123456 or /jobs/view/123456
+            id_match = re.search(r'(?:-|/)(\d+)/?$', parsed_url.path)
+            if not id_match:
+                # Log a structured warning for malformed URLs
+                logger.warning(
+                    "linkedin_invalid_job_url_skipped",
+                    extra={
+                        "source": self.source.value,
+                        "url": raw_url,
+                        "path": parsed_url.path,
+                    }
+                )
                 continue
 
-            # In the new LinkedIn guest UI, the title might be within spans inside the anchor,
-            # or in an adjacent element. We can extract text from the anchor as a fallback.
-            content = tag_pattern.sub(" ", match.group("content"))
+            external_id = id_match.group(1)
+            clean_url = self._absolute_url(parsed_url.path)
+
+            content = tag_pattern.sub(" ", raw_content)
             title = " ".join(content.split())
 
             if not title:
-                # Sometimes the anchor is empty except for spans, or title is in a nearby h3.
-                # Just use a placeholder if empty, the detail fetch will fix it.
                 title = "LinkedIn Job"
 
             jobs.append(
@@ -339,7 +338,7 @@ class LinkedInCollector:
                     source=self.source.value,
                     external_job_id=external_id,
                     title=title,
-                    url=self._absolute_url(url),
+                    url=clean_url,
                 )
             )
 
@@ -358,108 +357,60 @@ class LinkedInCollector:
         body: str,
         *,
         expected_external_job_id: str,
+        job_url: str,
     ) -> RawSourceJob | None:
         """Parse one LinkedIn JobPosting detail page."""
-        script_pattern = re.compile(
-            r'<script[^>]+type=["\']'
-            r"application/ld\+json"
-            r'["\'][^>]*>'
-            r"(.*?)</script>",
-            re.IGNORECASE | re.DOTALL,
-        )
-
-        for match in script_pattern.finditer(body):
-            raw_json = match.group(1).strip()
-            if not raw_json:
-                continue
-
-            try:
-                payload = json.loads(raw_json)
-            except json.JSONDecodeError:
-                continue
-
-            # Usually the payload is directly a JobPosting or a graph
-            if payload.get("@type") == "JobPosting":
-                job = self._job_from_mapping(payload, expected_external_job_id)
-                if job:
-                    return job
-
-            if "@graph" in payload:
-                for item in payload["@graph"]:
-                    if item.get("@type") == "JobPosting":
-                        job = self._job_from_mapping(item, expected_external_job_id)
-                        if job:
-                            return job
-
-        return None
-
-    def _job_from_mapping(
-        self,
-        value: Mapping[str, Any],
-        expected_external_job_id: str,
-    ) -> RawSourceJob | None:
-        """Convert LinkedIn JSON-LD mapping into RawSourceJob."""
-        title = value.get("title")
-        if not title:
+        title_match = re.search(r'<h2[^>]*class="[^"]*top-card-layout__title[^"]*"[^>]*>(.*?)</h2>', body, re.IGNORECASE | re.DOTALL)
+        if not title_match:
             return None
-
-        external_id = expected_external_job_id
-
-        url = value.get("url", "")
-        description = value.get("description", "")
-
-        # Cleanup HTML from description
-        tag_pattern = re.compile(r"<[^>]+>")
-        description = tag_pattern.sub(" ", description)
-        description = " ".join(description.split())
-
+        title = title_match.group(1).strip()
+        
         company = ""
-        hiring_org = value.get("hiringOrganization", {})
-        if isinstance(hiring_org, dict):
-            company = hiring_org.get("name", "")
-
+        company_match = re.search(r'<a[^>]*class="[^"]*topcard__org-name-link[^"]*"[^>]*>(.*?)</a>', body, re.IGNORECASE | re.DOTALL)
+        if not company_match:
+            company_match = re.search(r'<span[^>]*class="[^"]*topcard__flavor[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
+        if company_match:
+            company = company_match.group(1).strip()
+            
         location = ""
-        job_location = value.get("jobLocation", {})
-        if isinstance(job_location, dict):
-            address = job_location.get("address", {})
-            if isinstance(address, dict):
-                parts = []
-                if "addressLocality" in address:
-                    parts.append(address["addressLocality"])
-                if "addressRegion" in address:
-                    parts.append(address["addressRegion"])
-                if "addressCountry" in address:
-                    parts.append(address["addressCountry"])
-                location = ", ".join(parts)
-
-        posted_at = None
-        date_posted = value.get("datePosted")
-        if date_posted:
-            posted_at = self._parse_datetime(date_posted)
-
-        employment_type = value.get("employmentType", "")
-        if isinstance(employment_type, list):
-            employment_type = employment_type[0] if employment_type else ""
-
+        location_matches = re.findall(r'<span[^>]*class="[^"]*topcard__flavor topcard__flavor--bullet[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
+        if location_matches:
+            location = location_matches[0].strip()
+            
+        description = ""
+        desc_match = re.search(r'<div[^>]*class="[^"]*show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>', body, re.IGNORECASE | re.DOTALL)
+        if not desc_match:
+             desc_match = re.search(r'<div[^>]*class="[^"]*description__text[^"]*"[^>]*>(.*?)</div>', body, re.IGNORECASE | re.DOTALL)
+        if desc_match:
+            desc_raw = desc_match.group(1)
+            tag_pattern = re.compile(r"<[^>]+>")
+            description = tag_pattern.sub(" ", desc_raw)
+            description = " ".join(description.split())
+            
+        employment_type = ""
+        emp_match = re.search(r'<li[^>]*class="[^"]*description__job-criteria-item[^"]*"[^>]*>.*?Employment type.*?<span[^>]*class="[^"]*description__job-criteria-text[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
+        if emp_match:
+            employment_type = emp_match.group(1).strip()
+            
         remote = None
         if "remote" in location.lower() or "remote" in title.lower():
             remote = True
-
+            
         return RawSourceJob(
             source=self.source.value,
-            external_job_id=external_id,
+            external_job_id=expected_external_job_id,
             title=title,
             company=company,
             location=location,
-            url=url,
+            url=job_url,
             description=description,
             salary_text=None,
             employment_type=employment_type,
             remote=remote,
-            posted_at=posted_at,
+            posted_at=None,
             source_updated_at=None,
             skills=(),
-            raw_data=dict(value),
+            raw_data={"body": body[:500]},
         )
 
     @staticmethod

@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urljoin
 
 import httpx
 
+from app.core.config import Settings, get_settings
 from app.domain.jobs import JobSource
 from app.jobs.errors import (
     SourceBlockedError,
@@ -27,6 +28,7 @@ from app.jobs.errors import (
 )
 from app.jobs.normalization import DiscoveredSourceJob, RawSourceJob
 from app.jobs.targets import CollectionTarget
+from app.jobs.transport import build_collection_client
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +56,10 @@ class DiceCollector:
         *,
         client: httpx.AsyncClient | None = None,
         request_delay_seconds: float = _REQUEST_DELAY_SECONDS,
+        settings: Settings | None = None,
     ) -> None:
         self._client = client
+        self._settings = settings or get_settings()
         self._request_delay_seconds = request_delay_seconds
 
     async def collect(
@@ -217,22 +221,7 @@ class DiceCollector:
 
     def _build_client(self) -> httpx.AsyncClient:
         """Create the HTTP client used for Dice requests."""
-
-        return httpx.AsyncClient(
-            timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
-            follow_redirects=True,
-            headers={
-                "Accept": ("text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"),
-                "Accept-Language": "en-US,en;q=0.9",
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-            },
-        )
+        return build_collection_client(self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 
     async def _fetch_search_page(
         self,
