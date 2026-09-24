@@ -19,6 +19,7 @@ persistence, authenticated access control, IP security, and secure resume manage
 - trusted-proxy-aware IP allowlisting and append-oriented security auditing;
 - bounded route-specific rate limiting for authentication and security administration;
 - owner-scoped private resume upload, parsing, replacement, listing, and deletion;
+- scheduled Dice collection with canonical companies, jobs, and source observations;
 - unit and HTTP integration test foundations;
 - linting, strict type checking, coverage, and container configuration.
 
@@ -30,6 +31,7 @@ Queues and business domains remain deferred to their dedicated incremental phase
 - [Phase 3 — Authenticated User Access Control](docs/phases/phase-03-authenticated-access-control.md)
 - [Phase 4 — IP Security](docs/phases/phase-04-ip-security.md)
 - [Phase 5 — Secure Resume Management](docs/phases/phase-05-secure-resume-management.md)
+- [Phase 1A — Dice Canonical Global Job Ingestion](docs/global-job-platform.md)
 
 ## Architecture
 

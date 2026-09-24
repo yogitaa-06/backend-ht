@@ -1,137 +1,169 @@
-# Global job platform
+# Phase 1A — Dice canonical global job ingestion
 
-`backend-ht` is the authoritative backend. Collection is platform-wide and is
-strictly separate from resume upload, job search, and recommendation requests.
+HireAndTech collects a platform-wide job pool on a schedule. Collection is not
+triggered by searches, recommendations, resumes, or individual users. This keeps
+source load bounded and gives every user a consistent view of observed openings.
+
+## Source status
+
+| Source | Phase 1 status |
+| --- | --- |
+| Dice | Implemented |
+| LinkedIn | Planned for Phase 1B; not implemented here |
+| Glassdoor | Planned for Phase 1C; not implemented here |
+| BlueDoor | On hold |
+
+The source registry contains only the Dice collector. Existing enum values and
+cadence settings for later sources remain compatibility placeholders; the scheduler
+does not enqueue a source unless its collector is registered.
+
+## Data flow and process boundaries
 
 ```text
-                    Redis
-                      │
-Scheduler ────────────┤
-                      ↓
-                  ARQ Worker
-                      ↓
-               Source Registry
-                      ↓
-               Collector Interface
-                      ↓
-            Collection Coordinator
-                      ↓
-                  Normalize
-                      ↓
-               GlobalJobRepository
-                      ↓
-                  PostgreSQL
+ARQ scheduler -> Redis queue -> worker -> Dice collector -> RawSourceJob
+                                                        -> normalization
+                                                        -> canonical ingestion
+                                                        -> PostgreSQL
+                                                           ├── companies
+                                                           ├── jobs
+                                                           └── job_sources
 ```
 
-## Process separation
+FastAPI reads PostgreSQL and never runs scraper loops. The independently deployed
+ARQ worker owns Dice HTTP collection, Redis locking, normalization, and persistence.
+The Dice adapter contains only provider-specific HTTP and parsing behavior. Everything
+after `RawSourceJob` is source-neutral so later adapters can reuse it unchanged.
 
-FastAPI serves HTTP and reads PostgreSQL. It neither starts a worker nor runs a
-scraper loop. `GET /api/v1/jobs`, `GET /api/v1/jobs/recommended`, and all resume
-routes never enqueue collection work.
+Dice collection separates lightweight discovery from detail fetching. Search-result
+IDs are deduplicated before detail requests, recently scraped rows can skip another
+detail request, and a discovery-only observation refreshes `last_seen_at` without
+claiming a new `scraped_at`. Pagination, source limits, request delays, timeout
+classification, rate-limit retry delays, and bounded ARQ retries remain in place.
 
-ARQ runs in an independent process using `app.queue.worker.WorkerSettings`. The
-worker owns its PostgreSQL pool and uses ARQ's Redis pool. Worker startup fails
-clearly if Redis or PostgreSQL is unavailable; this does not make the FastAPI
-process depend on Redis.
+## Database responsibilities
 
-## Configuration
+- `hireandtech.companies` stores a conservatively resolved employer. Phase 1A reuses
+  only an exact normalized name; it does not strip corporate suffixes or fuzzy-match.
+- `hireandtech.jobs` stores a real-world opening. It has no provider identity.
+- `hireandtech.job_sources` stores the Dice listing and links it to one canonical job.
+  `(source, source_job_id)` is unique in PostgreSQL.
+- `hireandtech.global_jobs` remains the compatibility read model used by `/jobs`,
+  `/jobs/recommended`, and current administration routes.
 
-All variables use the `HIREANDTECH_` prefix:
+Migration `0007_canonical_jobs` is additive. It backfills each legacy `global_jobs`
+row into one canonical job with the same UUID and creates its source observation.
+Backfill deliberately does not merge legacy rows because historical data lacks enough
+evidence to prove two requisitions are identical.
 
-- `REDIS_URL`: secret Redis or Redis TLS DSN.
-- `JOB_COLLECTION_ENABLED`: enables scheduler enqueueing; it does not affect HTTP.
-- `DICE_COLLECTION_INTERVAL_MINUTES`, `LINKEDIN_COLLECTION_INTERVAL_MINUTES`,
-  and `GLASSDOOR_COLLECTION_INTERVAL_MINUTES`: source-specific cadence.
-- `JOB_COLLECTION_MAX_JOBS_PER_TARGET`: deployment-wide result ceiling.
-- `JOB_COLLECTION_LOCK_TTL_SECONDS`: distributed-lock crash safety.
-- `JOB_COLLECTION_TASK_TIMEOUT_SECONDS` and `JOB_COLLECTION_MAX_TRIES`: bounded
-  execution and retry limits.
-- `JOB_COLLECTION_TARGETS`: optional JSON list of platform targets.
+New collection items temporarily dual-write. The established `global_jobs` write is
+performed first. Canonical ingestion runs in a separate savepoint, so a canonical
+failure is logged and reported as a partial collection without discarding the legacy
+write. Within canonical ingestion, company, job, and job-source creation share one
+savepoint and roll back together.
 
-The built-in targets cover software, backend, frontend, full stack, DevOps,
-SRE, platform, cloud, data engineering, data science, machine learning, QA
-automation, and security. Exact duplicate searches are collapsed before
-enqueueing. Targets contain only source, query, location, enabled state, and a
-result limit—never user, resume, or candidate identifiers.
+## Deduplication and canonicalization
 
-## Scheduler and queue behavior
+Dice identity is `(dice, source_job_id)`. A transaction-scoped PostgreSQL advisory
+lock serializes cooperative workers ingesting that identity, while the database unique
+constraint remains the final invariant for every writer. Redis target locks reduce
+duplicate work but are not treated as the database correctness boundary.
 
-An ARQ cron function checks due work once per minute. Source-specific Redis due
-keys atomically prevent multiple scheduler processes from enqueueing the same
-source window. ARQ job IDs provide another enqueue-time uniqueness boundary.
-One target enqueue failure is logged and does not stop other targets.
+The normalized Dice URL removes fragments and common tracking parameters. It is a
+conservative fallback: an exact same-source URL may reuse a canonical job. A
+`canonical_hash` built from normalized company, title, location, and posting date is
+indexed for future candidate lookup, but is not unique and is never sufficient by
+itself to merge openings. Two distinct Dice IDs with identical text remain separate
+canonical jobs. This favors a recoverable false negative over a destructive false
+positive merge.
 
-Only registered collectors are enqueued. The registry is intentionally empty in
-Checkpoint 2: no collector pretends to scrape. Checkpoint 3 adds a real Dice
-collector and registers it in `build_collector_registry()` without changing the
-scheduler or task orchestration.
+Content hashes cover stable mutable listing fields and exclude observation timestamps.
+An unchanged listing updates observation timestamps only. Changed content updates the
+existing source observation and canonical mutable fields without changing identity or
+`first_seen_at`.
 
-## Collection task and result
+## Freshness semantics
 
-`run_job_collection` validates the target, resolves the collector, acquires an
-expiring Redis lease, and delegates collection, normalization, and persistence
-to `CollectionCoordinator`. The task does not duplicate normalization or upsert
-logic. Results and logs contain:
+- `posted_at`: Dice's best available posting time; it remains null when absent.
+- `source_updated_at`: the provider's modification time when Dice supplies one.
+- `first_seen_at`: HireAndTech's initial discovery; immutable on re-observation.
+- `last_seen_at`: most recent search/detail confirmation of the active listing.
+- `scraped_at`: most recent successful detail scrape. Discovery-only refreshes do not
+  change it.
 
-- source, query, and location;
-- start, finish, and duration;
-- discovered, normalized, inserted, updated, skipped, and failed counts;
-- lock acquisition and status.
+`scraped_at` is never substituted for `posted_at`.
 
-Statuses are `success`, `partial`, `failed`, `skipped_locked`, or
-`source_unavailable`. Unchanged source jobs refresh observation timestamps and
-count as skipped, not inserted. Item failures use nested database transactions
-so one malformed job does not invalidate the entire collection transaction.
+## Failure behavior
 
-## Distributed locking and retries
+- Temporary Dice network failures, blocking, and rate limits are classified for
+  bounded ARQ retries.
+- A malformed detail is logged without inventing data; successfully parsed items are
+  still retained.
+- Each item uses savepoints, so one invalid item does not invalidate the collection.
+- Canonical graph creation is transactional; a failed source insert cannot commit its
+  new company or job.
+- Ambiguous canonical candidates create separate jobs.
 
-The Redis lock key is based on a stable source/query/location identity. Locks
-use `SET NX PX`, a random owner token, and a Lua compare-and-delete release.
-Expiration prevents permanent deadlock after worker crashes, while the token
-prevents an expired owner from releasing a newer worker's lock.
-
-Collectors must classify temporary network, rate-limit, and source-block errors
-as `TemporaryCollectionError` variants. ARQ retries those with bounded backoff
-and a configured maximum attempt count. Permanent configuration errors and
-ordinary no-result responses are not retried indefinitely.
-
-## Health status
-
-`GET /api/v1/admin/system/status` performs a bounded Redis ping only when Redis
-is configured. Redis can be `healthy`, `unavailable`, or `unknown`. Worker health
-is `healthy` only when ARQ's actual heartbeat key exists; installation alone is
-never reported as health. Collection reports `disabled`, `healthy`, or `unknown`
-based on configuration and worker evidence.
+Structured records include source, source job ID, canonical job/company IDs, action,
+collection counts, and failure status. Raw payloads and credentials are not logged.
 
 ## Local operation (Windows PowerShell)
 
-Start Redis with Docker:
+From `backend-ht`, install dependencies and apply migrations:
+
+```powershell
+uv sync
+uv run alembic upgrade head
+uv run alembic current
+```
+
+Start local Redis, then run the worker and API in separate terminals:
 
 ```powershell
 docker run --name hireandtech-redis --detach --publish 6379:6379 redis:7-alpine
 docker exec hireandtech-redis redis-cli ping
-```
-
-Configure the current PowerShell session:
-
-```powershell
 $env:HIREANDTECH_REDIS_URL = "redis://localhost:6379/0"
 $env:HIREANDTECH_JOB_COLLECTION_ENABLED = "true"
-```
-
-Run FastAPI and the worker in separate terminals:
-
-```powershell
-uv run uvicorn app.main:app --reload
 uv run arq app.queue.worker.WorkerSettings
 ```
 
-Check the real worker heartbeat and run validation:
-
 ```powershell
-uv run arq app.queue.worker.WorkerSettings --check
-uv run ruff check .
-uv run mypy app
-uv run pytest -q
+uv run uvicorn app.main:app --reload
 ```
 
+Run a controlled direct Dice collection twice to verify insert then re-observation:
+
+```powershell
+uv run python scripts/test_dice_ingestion.py
+uv run python scripts/test_dice_ingestion.py
+```
+
+Or enqueue the controlled collection through the running ARQ worker:
+
+```powershell
+uv run python scripts/enqueue_dice_test.py
+```
+
+Quality checks:
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy app tests
+uv run pytest
+```
+
+Database integration and migration downgrade coverage require a disposable PostgreSQL
+URL in `HIREANDTECH_TEST_DATABASE_URL`. For a configured loopback PostgreSQL server,
+the repository can create and remove a randomly named database safely:
+
+```powershell
+uv run python scripts/test_postgres_disposable.py
+```
+
+## Adding a later source
+
+A future LinkedIn or Glassdoor phase should implement the existing collector contract,
+emit `RawSourceJob`, register the adapter, and add tests. It must call the same
+normalization and `CanonicalJobIngestionService`; it must not add source-specific
+canonical tables or persistence logic. Cross-source reuse will require explicit,
+reviewed evidence stronger than the current candidate hash.

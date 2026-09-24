@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Literal
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis as Redis
 
 from app.core.config import Settings
 

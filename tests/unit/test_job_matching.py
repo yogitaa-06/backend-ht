@@ -64,3 +64,17 @@ def test_normalization_hash_is_stable() -> None:
     assert normalized.role_family == "devops"
     assert normalized.skills == ["aws"]
     assert normalized.content_hash == normalize_job(raw).content_hash
+
+
+def test_normalization_removes_tracking_without_changing_source_identity() -> None:
+    raw = RawSourceJob(
+        "dice",
+        "123",
+        "DevOps Engineer",
+        url="https://www.DICE.com/job-detail/123/?utm_source=email&ref=feed#top",
+    )
+
+    normalized = normalize_job(raw)
+
+    assert normalized.external_job_id == "123"
+    assert normalized.job_url == "https://www.dice.com/job-detail/123"

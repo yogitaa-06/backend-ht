@@ -23,8 +23,10 @@ class FakeRedis:
 
 async def test_lock_acquisition_and_safe_release() -> None:
     redis = FakeRedis()
-    manager = RedisCollectionLockManager(  # type: ignore[arg-type]
-        redis, ttl_seconds=120, namespace="hireandtech"
+    manager = RedisCollectionLockManager(
+        redis,  # type: ignore[arg-type]
+        ttl_seconds=120,
+        namespace="hireandtech",
     )
 
     lease = await manager.acquire("target")
@@ -38,8 +40,10 @@ async def test_lock_acquisition_and_safe_release() -> None:
 
 async def test_lock_rejection_returns_none() -> None:
     redis = FakeRedis(acquire=False)
-    manager = RedisCollectionLockManager(  # type: ignore[arg-type]
-        redis, ttl_seconds=120, namespace="hireandtech"
+    manager = RedisCollectionLockManager(
+        redis,  # type: ignore[arg-type]
+        ttl_seconds=120,
+        namespace="hireandtech",
     )
 
     assert await manager.acquire("target") is None

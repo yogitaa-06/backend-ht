@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from app.domain.jobs import JobSource
 from app.jobs.errors import SourceUnavailableError
-from app.jobs.normalization import RawSourceJob
-from app.jobs.targets import CollectionTarget
 
 
 @runtime_checkable
 class JobSourceCollector(Protocol):
-    """Small source adapter contract; implementations arrive in later checkpoints."""
+    """Registered source adapter; coordinators feature-detect collection methods."""
 
     source: JobSource
-
-    async def collect(self, target: CollectionTarget) -> Sequence[RawSourceJob]: ...
 
 
 class CollectorRegistry:
@@ -48,5 +43,9 @@ class CollectorRegistry:
 
 
 def build_collector_registry() -> CollectorRegistry:
-    """Build the worker registry; Checkpoint 3 will register Dice here."""
-    return CollectorRegistry()
+    """Build the worker registry with implemented source collectors."""
+    from app.jobs.sources.dice import DiceCollector
+
+    registry = CollectorRegistry()
+    registry.register(DiceCollector())
+    return registry

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+from unicodedata import normalize as unicode_normalize
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 ROLE_FAMILIES = {
@@ -47,7 +50,19 @@ ROLE_COMPATIBILITY: dict[str, frozenset[str]] = {
 
 
 @dataclass(frozen=True)
+class DiscoveredSourceJob:
+    """Lightweight source result used before detail fetching."""
+
+    source: str
+    external_job_id: str
+    title: str
+    url: str | None = None
+
+
+@dataclass(frozen=True)
 class RawSourceJob:
+    """Source-neutral job payload emitted by every collector adapter."""
+
     source: str
     external_job_id: str
     title: str
@@ -59,7 +74,9 @@ class RawSourceJob:
     employment_type: str | None = None
     remote: bool | None = None
     posted_at: datetime | None = None
+    source_updated_at: datetime | None = None
     skills: tuple[str, ...] = ()
+    raw_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -70,7 +87,9 @@ class NormalizedJob:
     normalized_title: str
     role_family: str
     company: str | None
+    normalized_company: str | None
     location: str | None
+    normalized_location: str | None
     job_url: str | None
     description: str | None
     salary_text: str | None
@@ -78,14 +97,26 @@ class NormalizedJob:
     remote: bool | None
     skills: list[str]
     posted_at: datetime | None
+    source_updated_at: datetime | None
     experience_min_years: int | None
     experience_max_years: int | None
     experience_text: str | None
     content_hash: str
+    raw_data: dict[str, Any]
 
 
 def normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w+/#&.-]", " ", title.casefold())).strip()
+
+
+def normalize_company_name(company: str) -> str:
+    """Normalize exact employer names without fuzzy or suffix-based merging."""
+    return " ".join(unicode_normalize("NFKC", company).casefold().split())
+
+
+def normalize_location(location: str) -> str:
+    """Normalize location formatting while preserving meaningful punctuation."""
+    return " ".join(unicode_normalize("NFKC", location).casefold().split())
 
 
 def normalize_url(url: str | None) -> str | None:
@@ -174,32 +205,65 @@ def extract_experience(text: str | None) -> tuple[int | None, int | None, str | 
 
 
 def normalize_job(raw: RawSourceJob) -> NormalizedJob:
-    title = normalize_title(raw.title)
+    source = raw.source.strip().casefold()
+    external_job_id = raw.external_job_id.strip()
+    job_title = " ".join(raw.title.split())
+    if not source or not external_job_id or not job_title:
+        raise ValueError("source, external job ID, and title must not be blank")
+
+    title = normalize_title(job_title)
     minimum, maximum, experience_text = extract_experience(f"{raw.title}\n{raw.description or ''}")
     skills = sorted({skill.strip().casefold() for skill in raw.skills if skill.strip()})
     url = normalize_url(raw.url)
+    company = " ".join(raw.company.split()) if raw.company else None
+    location = " ".join(raw.location.split()) if raw.location else None
+    posted_at = _as_utc(raw.posted_at)
+    source_updated_at = _as_utc(raw.source_updated_at)
+    content = {
+        "company": company,
+        "description": raw.description,
+        "employment_type": raw.employment_type,
+        "job_url": url,
+        "location": location,
+        "posted_at": posted_at.isoformat() if posted_at else None,
+        "remote": raw.remote,
+        "salary_text": raw.salary_text,
+        "skills": skills,
+        "source_updated_at": source_updated_at.isoformat() if source_updated_at else None,
+        "title": job_title,
+    }
     digest = hashlib.sha256(
-        "|".join(
-            (raw.source, raw.external_job_id, title, raw.company or "", raw.description or "")
-        ).encode()
+        json.dumps(content, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
     return NormalizedJob(
-        raw.source,
-        raw.external_job_id,
-        raw.title.strip(),
+        source,
+        external_job_id,
+        job_title,
         title,
-        normalize_role(raw.title),
-        raw.company.strip() if raw.company else None,
-        raw.location.strip() if raw.location else None,
+        normalize_role(job_title),
+        company,
+        normalize_company_name(company) if company else None,
+        location,
+        normalize_location(location) if location else None,
         url,
         raw.description,
         raw.salary_text,
         raw.employment_type,
         raw.remote,
         skills,
-        raw.posted_at,
+        posted_at,
+        source_updated_at,
         minimum,
         maximum,
         experience_text,
         digest,
+        raw.raw_data,
     )
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.jobs import GlobalJob
@@ -28,6 +28,46 @@ class JobUpsertResult:
 
 
 class GlobalJobRepository:
+    async def get_existing_by_external_ids(
+        self,
+        session: AsyncSession,
+        source: str,
+        external_ids: Sequence[str],
+    ) -> dict[str, GlobalJob]:
+        """Return existing jobs for a source with one bulk query."""
+        ids = tuple(dict.fromkeys(external_ids))
+        if not ids:
+            return {}
+        rows = await session.scalars(
+            select(GlobalJob).where(
+                GlobalJob.source == source,
+                GlobalJob.external_job_id.in_(ids),
+            )
+        )
+        return {job.external_job_id: job for job in rows}
+
+    async def touch_seen(
+        self,
+        session: AsyncSession,
+        source: str,
+        external_ids: Sequence[str],
+        *,
+        seen_at: datetime | None = None,
+    ) -> int:
+        """Mark discovered jobs as seen without changing scraped_at."""
+        ids = tuple(dict.fromkeys(external_ids))
+        if not ids:
+            return 0
+        result = await session.execute(
+            update(GlobalJob)
+            .where(
+                GlobalJob.source == source,
+                GlobalJob.external_job_id.in_(ids),
+            )
+            .values(last_seen_at=seen_at or datetime.now(UTC), is_active=True)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def upsert(self, session: AsyncSession, job: NormalizedJob) -> GlobalJob:
         """Compatibility wrapper returning the persisted job."""
         return (await self.upsert_with_outcome(session, job)).job

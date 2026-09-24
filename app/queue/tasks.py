@@ -48,6 +48,7 @@ def _result(
         "jobs_updated": coordinator.jobs_updated if coordinator else 0,
         "jobs_skipped": coordinator.jobs_skipped if coordinator else 0,
         "jobs_failed": coordinator.jobs_failed if coordinator else 0,
+        "canonical_jobs_failed": coordinator.canonical_jobs_failed if coordinator else 0,
         "lock_acquired": lock_acquired,
         "status": status,
     }
@@ -82,6 +83,7 @@ async def run_job_collection(
             "jobs_updated": 0,
             "jobs_skipped": 0,
             "jobs_failed": 0,
+            "canonical_jobs_failed": 0,
             "lock_acquired": False,
             "status": "failed",
         }
@@ -119,7 +121,9 @@ async def run_job_collection(
         coordinator: CollectionCoordinator = ctx["collection_coordinator"]
         async with database.sessions() as session, session.begin():
             outcome = await coordinator.run(session, collector, target)
-        status: CollectionStatus = "partial" if outcome.jobs_failed else "success"
+        status: CollectionStatus = (
+            "partial" if outcome.jobs_failed or outcome.canonical_jobs_failed else "success"
+        )
         result = _result(
             target,
             started_at=started_at,
