@@ -37,6 +37,11 @@ async def test_dice_collector_parses_structured_job() -> None:
           "dateModified": "2026-09-23T11:00:00Z",
           "description": "Requires 2-4 years of experience.",
           "employmentType": "FULL_TIME",
+          "isRemote": false,
+          "baseSalary": {
+            "currency": "USD",
+            "value": {"minValue": 120000, "maxValue": 150000, "unitText": "YEAR"}
+          },
           "hiringOrganization": {
             "@type": "Organization",
             "name": "Example Technologies"
@@ -83,7 +88,9 @@ async def test_dice_collector_parses_structured_job() -> None:
     assert job.location == "Austin, TX, US"
     assert job.url == "https://www.dice.com/job-detail/abc123"
     assert job.description == "Requires 2-4 years of experience."
+    assert job.salary_text == "USD 120000 - 150000 per year"
     assert job.employment_type == "FULL_TIME"
+    assert job.remote is False
     assert job.skills == ("AWS", "Kubernetes", "Terraform")
     assert job.posted_at is not None
     assert job.source_updated_at is not None

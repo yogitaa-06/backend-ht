@@ -29,14 +29,29 @@ class MatchableJob(Protocol):
     legacy ``global_jobs`` read model to canonical jobs.
     """
 
-    role_family: str
-    experience_min_years: int | None
-    skills: list[str]
-    location: str | None
-    posted_at: datetime | None
-    last_seen_at: datetime
-    is_active: bool
-    remote: bool | None
+    @property
+    def role_family(self) -> str: ...
+
+    @property
+    def experience_min_years(self) -> int | None: ...
+
+    @property
+    def skills(self) -> list[str]: ...
+
+    @property
+    def location(self) -> str | None: ...
+
+    @property
+    def posted_at(self) -> datetime | None: ...
+
+    @property
+    def last_seen_at(self) -> datetime: ...
+
+    @property
+    def is_active(self) -> bool: ...
+
+    @property
+    def remote(self) -> bool | None: ...
 
 
 def experience_compatible(
@@ -45,11 +60,7 @@ def experience_compatible(
 ) -> bool:
     """Return whether the candidate satisfies the job's minimum experience."""
 
-    return (
-        candidate_years is None
-        or minimum is None
-        or float(candidate_years) >= minimum
-    )
+    return candidate_years is None or minimum is None or float(candidate_years) >= minimum
 
 
 def is_eligible(candidate: Candidate, job: MatchableJob) -> bool:
@@ -74,30 +85,14 @@ def rank_job(
     Ranking intentionally performs no network calls and no AI requests.
     """
 
-    role_score = (
-        30.0
-        if roles_compatible(candidate.role, job.role_family)
-        else 0.0
-    )
+    role_score = 30.0 if roles_compatible(candidate.role, job.role_family) else 0.0
 
-    candidate_skills = {
-        skill.casefold()
-        for skill in candidate.skills
-    }
+    candidate_skills = {skill.casefold() for skill in candidate.skills}
 
-    job_skills = {
-        skill.casefold()
-        for skill in job.skills
-    }
+    job_skills = {skill.casefold() for skill in job.skills}
 
     skills_score = (
-        30.0
-        * (
-            len(job_skills & candidate_skills)
-            / len(job_skills)
-        )
-        if job_skills
-        else 0.0
+        30.0 * (len(job_skills & candidate_skills) / len(job_skills)) if job_skills else 0.0
     )
 
     experience_score = (
@@ -106,8 +101,7 @@ def rank_job(
         else (
             20.0
             if candidate.years_experience is not None
-            and float(candidate.years_experience)
-            >= job.experience_min_years
+            and float(candidate.years_experience) >= job.experience_min_years
             else 0.0
         )
     )
@@ -118,10 +112,7 @@ def rank_job(
 
     age_days = max(
         0.0,
-        (
-            datetime.now(UTC) - freshness_reference
-        ).total_seconds()
-        / 86400,
+        (datetime.now(UTC) - freshness_reference).total_seconds() / 86400,
     )
 
     freshness_score = max(
@@ -131,11 +122,7 @@ def rank_job(
 
     return {
         "match_score": (
-            role_score
-            + skills_score
-            + experience_score
-            + location_score
-            + freshness_score
+            role_score + skills_score + experience_score + location_score + freshness_score
         ),
         "role_score": role_score,
         "skills_score": skills_score,
@@ -157,8 +144,7 @@ def _location_score(
     if (
         candidate.location
         and job.location
-        and candidate.location.casefold()
-        in job.location.casefold()
+        and candidate.location.casefold() in job.location.casefold()
     ):
         return 10.0
 

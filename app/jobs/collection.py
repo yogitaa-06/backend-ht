@@ -49,9 +49,19 @@ class CanonicalIngestion(Protocol):
         self, session: AsyncSession, *, source: str, source_job_ids: list[str]
     ) -> int: ...
 
+    async def detail_fetched_by_source_id(
+        self, session: AsyncSession, *, source: str, source_job_ids: list[str]
+    ) -> Mapping[str, bool]: ...
+
 
 class ExistingLegacyJob(Protocol):
     scraped_at: datetime
+    company: str | None
+    location: str | None
+    job_url: str | None
+    description: str | None
+    employment_type: str | None
+    posted_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -103,7 +113,7 @@ class CollectionCoordinator:
             if legacy_collect is None:
                 raise TypeError("collector does not support discovery or collection")
             raw_jobs = await legacy_collect(target)
-            return await self._persist_raw_jobs(session, target, raw_jobs, started=started)
+            return await self.persist_raw_jobs(session, target, raw_jobs, started=started)
 
         candidates = tuple(await discover(target))
         unique_candidates = tuple(
@@ -114,12 +124,21 @@ class CollectionCoordinator:
             target.source.value,
             [candidate.external_job_id for candidate in unique_candidates],
         )
+        detail_fetched = await self.canonical_ingestion.detail_fetched_by_source_id(
+            session,
+            source=target.source.value,
+            source_job_ids=[candidate.external_job_id for candidate in unique_candidates],
+        )
         refresh_before = datetime.now(UTC) - timedelta(hours=6)
         recent_ids = [
             candidate.external_job_id
             for candidate in unique_candidates
             if candidate.external_job_id in existing
             and existing[candidate.external_job_id].scraped_at >= refresh_before
+            and (
+                _has_complete_core_details(existing[candidate.external_job_id])
+                or detail_fetched.get(candidate.external_job_id, False)
+            )
         ]
         if recent_ids:
             await self.repository.touch_seen(session, target.source.value, recent_ids)
@@ -132,7 +151,7 @@ class CollectionCoordinator:
             if candidate.external_job_id not in recent_ids
         )
         raw_jobs = await fetch_details(target, detail_candidates)
-        result = await self._persist_raw_jobs(
+        result = await self.persist_raw_jobs(
             session,
             target,
             raw_jobs,
@@ -147,7 +166,7 @@ class CollectionCoordinator:
             }
         )
 
-    async def _persist_raw_jobs(
+    async def persist_raw_jobs(
         self,
         session: AsyncSession,
         target: CollectionTarget,
@@ -210,3 +229,21 @@ class CollectionCoordinator:
             canonical_jobs_failed=canonical_failed,
             details_fetched=len(raw_jobs),
         )
+
+
+def _has_complete_core_details(job: ExistingLegacyJob) -> bool:
+    """Return whether a legacy row contains the core detail-page fields."""
+    return all(
+        (
+            _has_text(job.company),
+            _has_text(job.location),
+            _has_text(job.job_url),
+            _has_text(job.description),
+            _has_text(job.employment_type),
+            job.posted_at is not None,
+        )
+    )
+
+
+def _has_text(value: str | None) -> bool:
+    return bool(value and value.strip())

@@ -38,6 +38,7 @@ class FakeCanonicalIngestion:
         self.fail = fail
         self.ingested: list[str] = []
         self.touched: list[str] = []
+        self.detail_fetched: dict[str, bool] = {}
 
     async def ingest(self, session: object, job: object) -> None:
         del session
@@ -49,6 +50,12 @@ class FakeCanonicalIngestion:
         del session, source
         self.touched.extend(source_job_ids)
         return len(source_job_ids)
+
+    async def detail_fetched_by_source_id(
+        self, session: object, *, source: str, source_job_ids: list[str]
+    ) -> dict[str, bool]:
+        del session, source
+        return {job_id: self.detail_fetched.get(job_id, False) for job_id in source_job_ids}
 
 
 class FakeRepository:
@@ -136,8 +143,16 @@ async def test_coordinator_normalizes_and_reports_upsert_outcomes() -> None:
 
 async def test_coordinator_skips_recent_candidates_and_fetches_stale_once() -> None:
     now = datetime.now(UTC)
-    recent = type("Existing", (), {"scraped_at": now - timedelta(hours=1)})()
-    stale = type("Existing", (), {"scraped_at": now - timedelta(hours=7)})()
+    complete = {
+        "company": "Example",
+        "location": "Austin, TX",
+        "job_url": "https://www.dice.com/job-detail/recent",
+        "description": "Complete detail",
+        "employment_type": "FULL_TIME",
+        "posted_at": now - timedelta(days=1),
+    }
+    recent = type("Existing", (), {"scraped_at": now - timedelta(hours=1), **complete})()
+    stale = type("Existing", (), {"scraped_at": now - timedelta(hours=7), **complete})()
     candidates = [
         DiscoveredSourceJob("dice", "recent", "Recent Job"),
         DiscoveredSourceJob("dice", "recent", "Recent Job"),
@@ -161,6 +176,69 @@ async def test_coordinator_skips_recent_candidates_and_fetches_stale_once() -> N
     assert collector.fetched == ["stale", "new"]
     assert repository.touched == ["recent"]
     assert canonical.touched == ["recent"]
+
+
+async def test_coordinator_fetches_recent_incomplete_migration_row() -> None:
+    now = datetime.now(UTC)
+    incomplete = type(
+        "Existing",
+        (),
+        {
+            "scraped_at": now,
+            "company": None,
+            "location": None,
+            "job_url": "https://www.dice.com/job-detail/incomplete",
+            "description": None,
+            "employment_type": None,
+            "posted_at": None,
+        },
+    )()
+    collector = DiscoveryCollector([DiscoveredSourceJob("dice", "incomplete", "Security Engineer")])
+    repository = DiscoveryRepository({"incomplete": incomplete})
+    canonical = FakeCanonicalIngestion()
+
+    result = await CollectionCoordinator(
+        cast(LegacyJobPersistence, repository), cast(CanonicalIngestion, canonical)
+    ).run(
+        cast(AsyncSession, FakeSession()),
+        collector,
+        CollectionTarget(source=JobSource.DICE, query="security"),
+    )
+
+    assert collector.fetched == ["incomplete"]
+    assert result.details_skipped_recent == 0
+
+
+async def test_coordinator_skips_recent_confirmed_detail_with_source_omissions() -> None:
+    now = datetime.now(UTC)
+    incomplete = type(
+        "Existing",
+        (),
+        {
+            "scraped_at": now,
+            "company": None,
+            "location": None,
+            "job_url": "https://www.dice.com/job-detail/confirmed",
+            "description": None,
+            "employment_type": None,
+            "posted_at": None,
+        },
+    )()
+    collector = DiscoveryCollector([DiscoveredSourceJob("dice", "confirmed", "Security Engineer")])
+    repository = DiscoveryRepository({"confirmed": incomplete})
+    canonical = FakeCanonicalIngestion()
+    canonical.detail_fetched["confirmed"] = True
+
+    result = await CollectionCoordinator(
+        cast(LegacyJobPersistence, repository), cast(CanonicalIngestion, canonical)
+    ).run(
+        cast(AsyncSession, FakeSession()),
+        collector,
+        CollectionTarget(source=JobSource.DICE, query="security"),
+    )
+
+    assert collector.fetched == []
+    assert result.details_skipped_recent == 1
 
 
 async def test_coordinator_preserves_legacy_write_when_canonical_write_fails() -> None:

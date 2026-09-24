@@ -40,6 +40,9 @@ class CanonicalJobRead:
     remote: bool | None
     skills: list[str]
     posted_at: datetime | None
+    source_updated_at: datetime | None
+    first_seen_at: datetime
+    scraped_at: datetime
     experience_min_years: int | None
     experience_max_years: int | None
     experience_text: str | None
@@ -64,9 +67,7 @@ class CanonicalJobRepository:
         when cooperative workers discover the same source listing concurrently.
         """
 
-        digest = hashlib.sha256(
-            f"{source}\0{source_job_id}".encode()
-        ).digest()
+        digest = hashlib.sha256(f"{source}\0{source_job_id}".encode()).digest()
 
         lock_key = int.from_bytes(
             digest[:8],
@@ -74,9 +75,7 @@ class CanonicalJobRepository:
             signed=True,
         )
 
-        await session.execute(
-            select(func.pg_advisory_xact_lock(lock_key))
-        )
+        await session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
     async def get_source(
         self,
@@ -109,9 +108,7 @@ class CanonicalJobRepository:
         if not source_job_ids:
             return 0
 
-        job_ids = select(
-            JobSourceObservation.job_id
-        ).where(
+        job_ids = select(JobSourceObservation.job_id).where(
             JobSourceObservation.source == source,
             JobSourceObservation.source_job_id.in_(source_job_ids),
         )
@@ -129,9 +126,7 @@ class CanonicalJobRepository:
             update(JobSourceObservation)
             .where(
                 JobSourceObservation.source == source,
-                JobSourceObservation.source_job_id.in_(
-                    source_job_ids
-                ),
+                JobSourceObservation.source_job_id.in_(source_job_ids),
             )
             .values(
                 last_seen_at=observed_at,
@@ -139,9 +134,31 @@ class CanonicalJobRepository:
             )
         )
 
-        return int(
-            getattr(result, "rowcount", 0) or 0
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def detail_fetched_by_source_id(
+        self,
+        session: AsyncSession,
+        *,
+        source: str,
+        source_job_ids: tuple[str, ...],
+    ) -> dict[str, bool]:
+        """Identify detail observations rather than migration-only stubs."""
+        if not source_job_ids:
+            return {}
+        rows = await session.execute(
+            select(
+                JobSourceObservation.source_job_id,
+                JobSourceObservation.raw_data,
+            ).where(
+                JobSourceObservation.source == source,
+                JobSourceObservation.source_job_id.in_(source_job_ids),
+            )
         )
+        return {
+            source_job_id: bool(raw_data) and "legacy_global_job_id" not in raw_data
+            for source_job_id, raw_data in rows
+        }
 
     async def resolve_company(
         self,
@@ -158,9 +175,7 @@ class CanonicalJobRepository:
                 name=name,
                 normalized_name=normalized_name,
             )
-            .on_conflict_do_nothing(
-                index_elements=[Company.normalized_name]
-            )
+            .on_conflict_do_nothing(index_elements=[Company.normalized_name])
             .returning(Company)
         )
 
@@ -170,16 +185,11 @@ class CanonicalJobRepository:
             return company, True
 
         company = await session.scalar(
-            select(Company).where(
-                Company.normalized_name == normalized_name
-            )
+            select(Company).where(Company.normalized_name == normalized_name)
         )
 
         if company is None:  # pragma: no cover
-            raise RuntimeError(
-                "company conflict did not resolve "
-                "to an existing row"
-            )
+            raise RuntimeError("company conflict did not resolve to an existing row")
 
         return company, False
 
@@ -297,58 +307,48 @@ class CanonicalJobRepository:
         )
 
         if canonical is None:
-            raise RuntimeError(
-                "source observation references "
-                "a missing canonical job"
-            )
+            raise RuntimeError("source observation references a missing canonical job")
 
         canonical.last_seen_at = observed_at
         canonical.is_active = True
 
-        if not content_changed:
-            await session.flush()
-            return
+        source.source_url = _prefer_text(job.job_url, source.source_url)
+        source.source_posted_at = job.posted_at or source.source_posted_at
+        source.source_updated_at = job.source_updated_at or source.source_updated_at
+        source.raw_data = job.raw_data or source.raw_data
+        if content_changed:
+            source.content_hash = job.content_hash
 
-        source.source_url = job.job_url
-        source.source_posted_at = job.posted_at
-        source.source_updated_at = job.source_updated_at
-        source.content_hash = job.content_hash
-        source.raw_data = job.raw_data
-
-        canonical.company_id = (
-            company.id
-            if company
-            else canonical.company_id
-        )
+        canonical.company_id = company.id if company else canonical.company_id
         canonical.title = job.job_title
         canonical.normalized_title = job.normalized_title
-        canonical.description = job.description
-        canonical.location = job.location
-        canonical.normalized_location = job.normalized_location
-        canonical.employment_type = job.employment_type
-        canonical.remote_type = _remote_type(job.remote)
-        canonical.skills = job.skills
+        canonical.description = _prefer_text(job.description, canonical.description)
+        if _has_text(job.location):
+            canonical.location = job.location
+            canonical.normalized_location = job.normalized_location
+        canonical.employment_type = _prefer_text(job.employment_type, canonical.employment_type)
+        canonical.remote_type = _remote_type(job.remote) or canonical.remote_type
+        canonical.skills = job.skills or canonical.skills
         canonical.experience_min_years = (
             job.experience_min_years
+            if job.experience_min_years is not None
+            else canonical.experience_min_years
         )
         canonical.experience_max_years = (
             job.experience_max_years
+            if job.experience_max_years is not None
+            else canonical.experience_max_years
         )
-        canonical.experience_text = job.experience_text
+        canonical.experience_text = _prefer_text(job.experience_text, canonical.experience_text)
         canonical.role_family = job.role_family
-        canonical.salary_text = job.salary_text
+        canonical.salary_text = _prefer_text(job.salary_text, canonical.salary_text)
 
-        canonical.posted_at = (
-            job.posted_at
-            or canonical.posted_at
-        )
+        canonical.posted_at = job.posted_at or canonical.posted_at
 
-        canonical.source_updated_at = (
-            job.source_updated_at
-            or canonical.source_updated_at
-        )
+        canonical.source_updated_at = job.source_updated_at or canonical.source_updated_at
 
-        canonical.canonical_hash = build_canonical_hash(job)
+        if job.normalized_company and job.normalized_location and job.posted_at:
+            canonical.canonical_hash = build_canonical_hash(job)
 
         await session.flush()
 
@@ -371,8 +371,7 @@ class CanonicalJobRepository:
             CanonicalJob.is_active.is_(True),
             exists(
                 select(JobSourceObservation.id).where(
-                    JobSourceObservation.job_id
-                    == CanonicalJob.id,
+                    JobSourceObservation.job_id == CanonicalJob.id,
                     JobSourceObservation.is_active.is_(True),
                 )
             ),
@@ -390,36 +389,19 @@ class CanonicalJobRepository:
             )
 
         if role:
-            predicates.append(
-                CanonicalJob.role_family == role
-            )
+            predicates.append(CanonicalJob.role_family == role)
 
         if role_families:
-            predicates.append(
-                CanonicalJob.role_family.in_(
-                    role_families
-                )
-            )
+            predicates.append(CanonicalJob.role_family.in_(role_families))
 
         if location:
-            predicates.append(
-                CanonicalJob.location.ilike(
-                    f"%{location}%"
-                )
-            )
+            predicates.append(CanonicalJob.location.ilike(f"%{location}%"))
 
         if remote is not None:
-            predicates.append(
-                CanonicalJob.remote_type
-                == ("remote" if remote else "on_site")
-            )
+            predicates.append(CanonicalJob.remote_type == ("remote" if remote else "on_site"))
 
         if employment_type:
-            predicates.append(
-                CanonicalJob.employment_type.ilike(
-                    employment_type
-                )
-            )
+            predicates.append(CanonicalJob.employment_type.ilike(employment_type))
 
         statement = (
             select(
@@ -478,21 +460,16 @@ class CanonicalJobRepository:
                     description=canonical.description,
                     salary_text=canonical.salary_text,
                     employment_type=canonical.employment_type,
-                    remote=_remote_bool(
-                        canonical.remote_type
-                    ),
+                    remote=_remote_bool(canonical.remote_type),
                     skills=list(canonical.skills or []),
                     posted_at=canonical.posted_at,
-                    experience_min_years=(
-                        canonical.experience_min_years
-                    ),
-                    experience_max_years=(
-                        canonical.experience_max_years
-                    ),
-                    experience_text=(
-                        canonical.experience_text
-                    ),
-                    last_seen_at=canonical.last_seen_at,
+                    source_updated_at=source.source_updated_at,
+                    first_seen_at=source.first_seen_at,
+                    scraped_at=source.scraped_at,
+                    experience_min_years=(canonical.experience_min_years),
+                    experience_max_years=(canonical.experience_max_years),
+                    experience_text=(canonical.experience_text),
+                    last_seen_at=source.last_seen_at,
                     is_active=canonical.is_active,
                 )
             )
@@ -506,7 +483,7 @@ class CanonicalJobRepository:
     ) -> JobSourceObservation | None:
         """Choose one deterministic active provider for API presentation."""
 
-        return await session.scalar(
+        observation: JobSourceObservation | None = await session.scalar(
             select(JobSourceObservation)
             .where(
                 JobSourceObservation.job_id == job_id,
@@ -520,6 +497,7 @@ class CanonicalJobRepository:
             )
             .limit(1)
         )
+        return observation
 
 
 def _remote_type(
@@ -548,3 +526,11 @@ def _remote_bool(
         return False
 
     return None
+
+
+def _has_text(value: str | None) -> bool:
+    return bool(value and value.strip())
+
+
+def _prefer_text(incoming: str | None, existing: str | None) -> str | None:
+    return incoming if _has_text(incoming) else existing

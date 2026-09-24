@@ -21,6 +21,10 @@ class JobResponse(BaseModel):
     remote: bool | None
     skills: list[str]
     posted_at: datetime | None
+    source_updated_at: datetime | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    scraped_at: datetime
     experience_min_years: int | None
     experience_max_years: int | None
     experience_text: str | None

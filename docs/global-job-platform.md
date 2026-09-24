@@ -143,6 +143,26 @@ Or enqueue the controlled collection through the running ARQ worker:
 uv run python scripts/enqueue_dice_test.py
 ```
 
+Inspect Dice completeness without changing data:
+
+```powershell
+uv run python scripts/repair_incomplete_dice_jobs.py --samples
+```
+
+Repair canonical rows from richer local `global_jobs` data first. Both repair modes
+are explicit, bounded, and safe to rerun; neither is invoked by API startup or job reads:
+
+```powershell
+uv run python scripts/repair_incomplete_dice_jobs.py --apply-local --limit 5
+```
+
+After local repair is exhausted, test at most five Dice detail re-fetches through the
+existing adapter, normalization, legacy upsert, and canonical ingestion pipeline:
+
+```powershell
+uv run python scripts/repair_incomplete_dice_jobs.py --fetch-live --limit 5
+```
+
 Quality checks:
 
 ```powershell

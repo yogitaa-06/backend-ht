@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -110,13 +110,10 @@ class GlobalJobRepository:
             session.add(existing)
             status = JobUpsertStatus.INSERTED
         elif existing.content_hash == job.content_hash:
-            existing.last_seen_at = now
-            existing.scraped_at = now
-            existing.is_active = True
+            _merge_values(existing, values)
             status = JobUpsertStatus.SKIPPED
         else:
-            for key, value in values.items():
-                setattr(existing, key, value)
+            _merge_values(existing, values)
             status = JobUpsertStatus.UPDATED
         await session.flush()
         return JobUpsertResult(existing, status)
@@ -201,3 +198,37 @@ class GlobalJobRepository:
             "jobs_by_source": by_source,
             "jobs_by_role_family": by_role,
         }
+
+
+def _prefer_text(incoming: object, existing: str | None) -> object:
+    if isinstance(incoming, str) and incoming.strip():
+        return incoming
+    return existing
+
+
+def _merge_values(existing: GlobalJob, values: Mapping[str, object]) -> None:
+    for key, value in values.items():
+        if key in {
+            "company",
+            "location",
+            "job_url",
+            "description",
+            "salary_text",
+            "employment_type",
+            "experience_text",
+        }:
+            value = _prefer_text(value, getattr(existing, key))
+        elif (
+            key
+            in {
+                "remote",
+                "posted_at",
+                "experience_min_years",
+                "experience_max_years",
+            }
+            and value is None
+        ):
+            value = getattr(existing, key)
+        elif key == "skills" and not value:
+            value = existing.skills
+        setattr(existing, key, value)

@@ -1,4 +1,3 @@
-
 """Canonical global-job persistence models."""
 
 from __future__ import annotations
@@ -114,9 +113,7 @@ class GlobalJob(IdentityTimestampMixin, Base):
         server_default="[]",
     )
 
-    posted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     experience_min_years: Mapped[int | None] = mapped_column(Integer)
     experience_max_years: Mapped[int | None] = mapped_column(Integer)
@@ -172,9 +169,7 @@ class Company(IdentityTimestampMixin, Base):
     website_url: Mapped[str | None] = mapped_column(String(2048))
     domain: Mapped[str | None] = mapped_column(String(255))
 
-    jobs: Mapped[list[CanonicalJob]] = relationship(
-        back_populates="company"
-    )
+    jobs: Mapped[list[CanonicalJob]] = relationship(back_populates="company")
 
 
 class CanonicalJob(IdentityTimestampMixin, Base):
@@ -196,8 +191,7 @@ class CanonicalJob(IdentityTimestampMixin, Base):
             name="experience_ordered",
         ),
         CheckConstraint(
-            "salary_min IS NULL OR salary_max IS NULL "
-            "OR salary_max >= salary_min",
+            "salary_min IS NULL OR salary_max IS NULL OR salary_max >= salary_min",
             name="salary_ordered",
         ),
         Index(
@@ -270,12 +264,8 @@ class CanonicalJob(IdentityTimestampMixin, Base):
     salary_currency: Mapped[str | None] = mapped_column(String(3))
     salary_text: Mapped[str | None] = mapped_column(String(500))
 
-    posted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-    source_updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -300,9 +290,7 @@ class CanonicalJob(IdentityTimestampMixin, Base):
         nullable=False,
     )
 
-    company: Mapped[Company | None] = relationship(
-        back_populates="jobs"
-    )
+    company: Mapped[Company | None] = relationship(back_populates="jobs")
 
     sources: Mapped[list[JobSourceObservation]] = relationship(
         back_populates="job",
@@ -356,12 +344,8 @@ class JobSourceObservation(IdentityTimestampMixin, Base):
 
     source_url: Mapped[str | None] = mapped_column(String(2048))
 
-    source_posted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-    source_updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    source_posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -399,7 +383,4 @@ class JobSourceObservation(IdentityTimestampMixin, Base):
         server_default="{}",
     )
 
-    job: Mapped[CanonicalJob] = relationship(
-        back_populates="sources"
-    )
-
+    job: Mapped[CanonicalJob] = relationship(back_populates="sources")

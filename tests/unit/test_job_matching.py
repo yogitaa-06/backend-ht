@@ -78,3 +78,33 @@ def test_normalization_removes_tracking_without_changing_source_identity() -> No
 
     assert normalized.external_job_id == "123"
     assert normalized.job_url == "https://www.dice.com/job-detail/123"
+
+
+def test_normalization_preserves_available_detail_fields_without_synthesizing_posted_at() -> None:
+    posted_at = datetime(2026, 9, 11, 14, 32, 19, tzinfo=UTC)
+    normalized = normalize_job(
+        RawSourceJob(
+            "dice",
+            "detail-1",
+            "Senior Security Engineer",
+            company="Example Corp",
+            location="New York, NY, US",
+            url="https://www.dice.com/job-detail/detail-1",
+            description="Protect services.",
+            salary_text="USD 150000 per year",
+            employment_type="FULL_TIME",
+            remote=False,
+            posted_at=posted_at,
+            skills=("Python", "AWS"),
+        )
+    )
+
+    assert normalized.company == "Example Corp"
+    assert normalized.location == "New York, NY, US"
+    assert normalized.description == "Protect services."
+    assert normalized.salary_text == "USD 150000 per year"
+    assert normalized.employment_type == "FULL_TIME"
+    assert normalized.remote is False
+    assert normalized.posted_at == posted_at
+    assert normalized.skills == ["aws", "python"]
+    assert normalize_job(RawSourceJob("dice", "detail-2", "Engineer")).posted_at is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -64,7 +65,7 @@ class CanonicalJobIngestionService:
         )
         if existing_source is not None:
             content_changed = existing_source.content_hash != job.content_hash
-            company, company_created = await self._resolve_company(session, job, content_changed)
+            company, company_created = await self._resolve_company(session, job, True)
             await self.repository.refresh_source(
                 session,
                 existing_source,
@@ -124,6 +125,16 @@ class CanonicalJobIngestionService:
             source=source,
             source_job_ids=tuple(dict.fromkeys(source_job_ids)),
             observed_at=self.clock(),
+        )
+
+    async def detail_fetched_by_source_id(
+        self, session: AsyncSession, *, source: str, source_job_ids: list[str]
+    ) -> Mapping[str, bool]:
+        """Report which identities have a persisted source-detail payload."""
+        return await self.repository.detail_fetched_by_source_id(
+            session,
+            source=source,
+            source_job_ids=tuple(dict.fromkeys(source_job_ids)),
         )
 
     async def _resolve_company(
