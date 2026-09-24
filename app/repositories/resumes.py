@@ -113,6 +113,21 @@ class CandidateProfileRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_latest_owned(
+        self,
+        session: AsyncSession,
+        *,
+        owner_profile_id: UUID,
+    ) -> CandidateProfile | None:
+        """Return the most recently updated candidate profile for an owner."""
+        result = await session.execute(
+            select(CandidateProfile)
+            .where(CandidateProfile.owner_profile_id == owner_profile_id)
+            .order_by(CandidateProfile.updated_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
 
 class ResumeStorageCleanupRepository:
     """Persistence operations for durable private-storage cleanup intents."""

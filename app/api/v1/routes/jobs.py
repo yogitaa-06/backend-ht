@@ -4,19 +4,13 @@ from math import ceil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_profile
 from app.db.session import get_session
 from app.domain.profiles import Profile
-from app.domain.resumes import CandidateProfile
-from app.jobs.matching import Candidate, is_eligible, rank_job
-from app.jobs.normalization import ROLE_COMPATIBILITY, normalize_role
-from app.repositories.canonical_jobs import (
-    CanonicalJobRead,
-    CanonicalJobRepository,
-)
+from app.jobs.service import JobService, get_job_service
+from app.repositories.canonical_jobs import CanonicalJobRead
 from app.schemas.jobs import JobPage, JobResponse
 
 router = APIRouter(prefix="/jobs")
@@ -31,7 +25,10 @@ profile_dep = Annotated[
     Depends(get_current_profile),
 ]
 
-repository = CanonicalJobRepository()
+service_dep = Annotated[
+    JobService,
+    Depends(get_job_service),
+]
 
 
 def _response(
@@ -55,6 +52,10 @@ def _response(
         "remote": job.remote,
         "skills": job.skills,
         "posted_at": job.posted_at,
+        "source_updated_at": job.source_updated_at,
+        "first_seen_at": job.first_seen_at,
+        "last_seen_at": job.last_seen_at,
+        "scraped_at": job.scraped_at,
         "experience_min_years": job.experience_min_years,
         "experience_max_years": job.experience_max_years,
         "experience_text": job.experience_text,
@@ -91,6 +92,7 @@ def _page(
 async def search_jobs(
     _: profile_dep,
     session: session_dep,
+    service: service_dep,
     query: Annotated[
         str | None,
         Query(max_length=200),
@@ -123,7 +125,7 @@ async def search_jobs(
     User requests never trigger provider scraping.
     """
 
-    rows, total = await repository.search(
+    rows, total = await service.search(
         session,
         query=query,
         role=role,
@@ -150,6 +152,7 @@ async def search_jobs(
 async def recommended_jobs(
     profile: profile_dep,
     session: session_dep,
+    service: service_dep,
     page: Annotated[
         int,
         Query(ge=1),
@@ -161,84 +164,15 @@ async def recommended_jobs(
 ) -> JobPage:
     """Return deterministic candidate recommendations from canonical jobs."""
 
-    candidate_profile = await session.scalar(
-        select(CandidateProfile)
-        .where(
-            CandidateProfile.owner_profile_id
-            == profile.id
-        )
-        .order_by(
-            CandidateProfile.updated_at.desc()
-        )
-        .limit(1)
-    )
-
-    if candidate_profile is None:
-        return _page(
-            [],
-            page,
-            page_size,
-            0,
-        )
-
-    candidate = Candidate(
-        role=candidate_profile.current_title or "",
-        years_experience=(
-            candidate_profile.years_of_experience
-        ),
-        skills=frozenset(
-            skill.casefold()
-            for skill in candidate_profile.skills
-        ),
-        location=candidate_profile.location,
-    )
-
-    candidate_role = normalize_role(
-        candidate.role
-    )
-
-    compatible_roles = tuple(
-        ROLE_COMPATIBILITY.get(
-            candidate_role,
-            (candidate_role,),
-        )
-    )
-
-    rows, _ = await repository.search(
+    rows, total = await service.get_recommendations(
         session,
-        role_families=compatible_roles,
-        page=1,
-        page_size=500,
+        owner_profile_id=profile.id,
+        page=page,
+        page_size=page_size,
     )
-
-    ranked = [
-        (
-            job,
-            rank_job(candidate, job),
-        )
-        for job in rows
-        if is_eligible(candidate, job)
-    ]
-
-    ranked.sort(
-        key=lambda item: (
-            -item[1]["match_score"],
-            item[0].id,
-        )
-    )
-
-    total = len(ranked)
-
-    start = (page - 1) * page_size
-    end = page * page_size
-
-    selected = ranked[start:end]
 
     return _page(
-        [
-            _response(job, scores)
-            for job, scores in selected
-        ],
+        [_response(job, scores) for job, scores in rows],
         page,
         page_size,
         total,
