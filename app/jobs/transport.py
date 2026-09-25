@@ -21,7 +21,10 @@ def build_collection_client(
 
     Connects through the configured proxy if one is defined in Settings.
     """
-    proxy_url = settings.job_collection_proxy_url.get_secret_value() if settings.job_collection_proxy_url else None
+    proxy_url = (
+        settings.job_collection_proxy_url.get_secret_value()
+        if settings.job_collection_proxy_url else None
+    )
     
     transport_kwargs: dict[str, Any] = {
         "retries": 3,

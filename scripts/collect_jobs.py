@@ -15,7 +15,12 @@ from app.jobs.targets import CollectionTarget
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Manual Job Ingestion")
-    parser.add_argument("--source", type=str, choices=["dice", "linkedin", "glassdoor"], help="Source to scrape")
+    parser.add_argument(
+        "--source",
+        type=str,
+        choices=["dice", "linkedin", "glassdoor"],
+        help="Source to scrape"
+    )
     parser.add_argument("--all", action="store_true", help="Scrape all sources")
     parser.add_argument("--query", type=str, default="Software Engineer", help="Job search query")
     parser.add_argument("--location", type=str, default="United States", help="Job search location")
