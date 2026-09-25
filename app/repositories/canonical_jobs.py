@@ -361,20 +361,23 @@ class CanonicalJobRepository:
         location: str | None = None,
         remote: bool | None = None,
         employment_type: str | None = None,
+        source: str | None = None,
         role_families: Sequence[str] | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[CanonicalJobRead], int]:
         """Search canonical jobs without duplicating multi-source openings."""
 
+        source_predicates: list[ColumnElement[bool]] = [
+            JobSourceObservation.job_id == CanonicalJob.id,
+            JobSourceObservation.is_active.is_(True),
+        ]
+        if source:
+            source_predicates.append(JobSourceObservation.source == source)
+
         predicates: list[ColumnElement[bool]] = [
             CanonicalJob.is_active.is_(True),
-            exists(
-                select(JobSourceObservation.id).where(
-                    JobSourceObservation.job_id == CanonicalJob.id,
-                    JobSourceObservation.is_active.is_(True),
-                )
-            ),
+            exists(select(JobSourceObservation.id).where(*source_predicates)),
         ]
 
         if query:
@@ -439,37 +442,37 @@ class CanonicalJobRepository:
         reads: list[CanonicalJobRead] = []
 
         for canonical, company_name in canonical_rows:
-            source = await self._presentation_source(
+            observation = await self._presentation_source(
                 session,
                 canonical.id,
             )
 
-            if source is None:
+            if observation is None:
                 continue
 
             reads.append(
                 CanonicalJobRead(
                     id=canonical.id,
-                    source=str(source.source),
-                    external_job_id=source.source_job_id,
+                    source=str(observation.source),
+                    external_job_id=observation.source_job_id,
                     job_title=canonical.title,
                     role_family=canonical.role_family,
                     company=company_name,
                     location=canonical.location,
-                    job_url=source.source_url,
+                    job_url=observation.source_url,
                     description=canonical.description,
                     salary_text=canonical.salary_text,
                     employment_type=canonical.employment_type,
                     remote=_remote_bool(canonical.remote_type),
                     skills=list(canonical.skills or []),
                     posted_at=canonical.posted_at,
-                    source_updated_at=source.source_updated_at,
-                    first_seen_at=source.first_seen_at,
-                    scraped_at=source.scraped_at,
+                    source_updated_at=observation.source_updated_at,
+                    first_seen_at=observation.first_seen_at,
+                    scraped_at=observation.scraped_at,
                     experience_min_years=(canonical.experience_min_years),
                     experience_max_years=(canonical.experience_max_years),
                     experience_text=(canonical.experience_text),
-                    last_seen_at=source.last_seen_at,
+                    last_seen_at=observation.last_seen_at,
                     is_active=canonical.is_active,
                 )
             )

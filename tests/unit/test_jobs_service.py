@@ -49,6 +49,7 @@ async def test_search_delegates_to_job_repo(
         location="NY",
         remote=True,
         employment_type="FULL_TIME",
+        source=None,
         page=2,
         page_size=10,
     )

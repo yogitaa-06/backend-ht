@@ -36,6 +36,7 @@ class JobService:
         location: str | None = None,
         remote: bool | None = None,
         employment_type: str | None = None,
+        source: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[CanonicalJobRead], int]:
@@ -47,6 +48,7 @@ class JobService:
             location=location,
             remote=remote,
             employment_type=employment_type,
+            source=source,
             page=page,
             page_size=page_size,
         )

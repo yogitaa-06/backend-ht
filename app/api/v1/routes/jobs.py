@@ -110,6 +110,10 @@ async def search_jobs(
         str | None,
         Query(max_length=100),
     ] = None,
+    source: Annotated[
+        str | None,
+        Query(max_length=100),
+    ] = None,
     page: Annotated[
         int,
         Query(ge=1),
@@ -132,6 +136,7 @@ async def search_jobs(
         location=location,
         remote=remote,
         employment_type=employment_type,
+        source=source,
         page=page,
         page_size=page_size,
     )
