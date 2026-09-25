@@ -23,6 +23,7 @@ def source_interval_minutes(settings: Settings, source: JobSource) -> int:
         JobSource.DICE: settings.dice_collection_interval_minutes,
         JobSource.LINKEDIN: settings.linkedin_collection_interval_minutes,
         JobSource.GLASSDOOR: settings.glassdoor_collection_interval_minutes,
+        JobSource.HIRINGCAFE: settings.hiringcafe_collection_interval_minutes,
     }[source]
 
 

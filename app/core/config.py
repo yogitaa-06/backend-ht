@@ -126,8 +126,9 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
     redis_connect_timeout_seconds: float = Field(default=5, gt=0, le=30)
     dice_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
-    linkedin_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
-    glassdoor_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    linkedin_collection_interval_minutes: int = Field(default=60, ge=1, le=1440)
+    glassdoor_collection_interval_minutes: int = Field(default=120, ge=1, le=1440)
+    hiringcafe_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
     job_collection_max_jobs_per_target: int = Field(default=100, ge=1, le=1000)
     job_collection_lock_ttl_seconds: int = Field(default=900, ge=60, le=7200)
     job_collection_task_timeout_seconds: int = Field(default=600, ge=30, le=3600)
