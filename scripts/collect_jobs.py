@@ -11,6 +11,7 @@ from app.domain.jobs import JobSource
 from app.jobs.collection import CollectionCoordinator
 from app.jobs.registry import build_collector_registry
 from app.jobs.targets import CollectionTarget
+from typing import List
 
 
 async def main() -> None:
@@ -38,7 +39,7 @@ async def main() -> None:
     registry = build_collector_registry()
     coordinator = CollectionCoordinator()
     
-    sources_to_run = []
+    sources_to_run: List[JobSource] = []
     if args.all:
         sources_to_run = [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR]
     elif args.source:
