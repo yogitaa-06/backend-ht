@@ -295,43 +295,61 @@ class LinkedInCollector:
         """Parse LinkedIn search HTML into discovered jobs."""
         jobs: list[DiscoveredSourceJob] = []
 
-        # Find <a> elements containing job links
-        link_pattern = re.compile(
-            r'<a[^>]+href=["\']([^"\']*/jobs/view/[^"\']*)["\'][^>]*>(.*?)</a>',
-            re.IGNORECASE | re.DOTALL,
-        )
-
+        chunks = re.split(r'(?i)<li[^>]*>', body)
         tag_pattern = re.compile(r"<[^>]+>")
 
-        for match in link_pattern.finditer(body):
-            raw_url = match.group(1)
-            raw_content = match.group(2)
-
-            parsed_url = urlparse(raw_url)
-            
-            # The ID must be at the end of the pathname
-            # e.g., /jobs/view/software-engineer-123456 or /jobs/view/123456
-            id_match = re.search(r'(?:-|/)(\d+)/?$', parsed_url.path)
-            if not id_match:
-                # Log a structured warning for malformed URLs
-                logger.warning(
-                    "linkedin_invalid_job_url_skipped",
-                    extra={
-                        "source": self.source.value,
-                        "url": raw_url,
-                        "path": parsed_url.path,
-                    }
-                )
+        for chunk in chunks:
+            if "/jobs/view/" not in chunk:
                 continue
 
-            external_id = id_match.group(1)
+            link_match = re.search(
+                r'<a[^>]+href=["\']([^"\']*/jobs/view/[^"\']*)["\']',
+                chunk,
+                re.IGNORECASE
+            )
+            if not link_match:
+                continue
+
+            raw_url = link_match.group(1)
+            parsed_url = urlparse(raw_url)
             clean_url = self._absolute_url(parsed_url.path)
 
-            content = tag_pattern.sub(" ", raw_content)
-            title = " ".join(content.split())
+            urn_match = re.search(
+                r'data-entity-urn=["\']urn:li:jobPosting:(\d+)["\']', chunk, re.IGNORECASE
+            )
+            if urn_match:
+                external_id = urn_match.group(1)
+            else:
+                id_match = re.search(r'(?:-|/)(\d+)/?$', parsed_url.path)
+                if id_match:
+                    external_id = id_match.group(1)
+                else:
+                    logger.warning(
+                        "linkedin_invalid_job_url_skipped",
+                        extra={
+                            "source": self.source.value,
+                            "url": raw_url,
+                            "path": parsed_url.path,
+                        }
+                    )
+                    continue
 
-            if not title:
-                title = "LinkedIn Job"
+            title_match = re.search(
+                r'<h3[^>]*base-search-card__title[^>]*>(.*?)</h3>',
+                chunk,
+                re.IGNORECASE | re.DOTALL
+            )
+            if title_match:
+                title_raw = title_match.group(1)
+            else:
+                title_match_a = re.search(
+                    r'<a[^>]+href=["\'][^"\']*["\'][^>]*>(.*?)</a>',
+                    chunk,
+                    re.IGNORECASE | re.DOTALL
+                )
+                title_raw = title_match_a.group(1) if title_match_a else "LinkedIn Job"
+
+            title = " ".join(tag_pattern.sub(" ", title_raw).split())
 
             jobs.append(
                 DiscoveredSourceJob(
@@ -357,45 +375,89 @@ class LinkedInCollector:
         body: str,
         *,
         expected_external_job_id: str,
-        job_url: str,
+        job_url: str | None,
     ) -> RawSourceJob | None:
         """Parse one LinkedIn JobPosting detail page."""
-        title_match = re.search(r'<h2[^>]*class="[^"]*top-card-layout__title[^"]*"[^>]*>(.*?)</h2>', body, re.IGNORECASE | re.DOTALL)
+        title_match = re.search(
+            r'<h2[^>]*class="[^"]*top-card-layout__title[^"]*"[^>]*>(.*?)</h2>',
+            body,
+            re.IGNORECASE | re.DOTALL
+        )
         if not title_match:
             return None
         title = title_match.group(1).strip()
-        
+
         company = ""
-        company_match = re.search(r'<a[^>]*class="[^"]*topcard__org-name-link[^"]*"[^>]*>(.*?)</a>', body, re.IGNORECASE | re.DOTALL)
+        company_match = re.search(
+            r'<a[^>]*class="[^"]*topcard__org-name-link[^"]*"[^>]*>(.*?)</a>',
+            body,
+            re.IGNORECASE | re.DOTALL
+        )
         if not company_match:
-            company_match = re.search(r'<span[^>]*class="[^"]*topcard__flavor[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
+            company_match = re.search(
+                r'<span[^>]*class="[^"]*topcard__flavor[^"]*"[^>]*>(.*?)</span>',
+                body,
+                re.IGNORECASE | re.DOTALL
+            )
         if company_match:
             company = company_match.group(1).strip()
-            
+
         location = ""
-        location_matches = re.findall(r'<span[^>]*class="[^"]*topcard__flavor topcard__flavor--bullet[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
+        location_matches = re.findall(
+            r'<span[^>]*class="[^"]*topcard__flavor topcard__flavor--bullet'
+            r'[^"]*"[^>]*>(.*?)</span>',
+            body,
+            re.IGNORECASE | re.DOTALL
+        )
         if location_matches:
             location = location_matches[0].strip()
-            
+
         description = ""
-        desc_match = re.search(r'<div[^>]*class="[^"]*show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>', body, re.IGNORECASE | re.DOTALL)
+        desc_match = re.search(
+            r'<div[^>]*class="[^"]*show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>',
+            body,
+            re.IGNORECASE | re.DOTALL
+        )
         if not desc_match:
-             desc_match = re.search(r'<div[^>]*class="[^"]*description__text[^"]*"[^>]*>(.*?)</div>', body, re.IGNORECASE | re.DOTALL)
+             desc_match = re.search(
+                 r'<div[^>]*class="[^"]*description__text[^"]*"[^>]*>(.*?)</div>',
+                 body,
+                 re.IGNORECASE | re.DOTALL
+             )
         if desc_match:
             desc_raw = desc_match.group(1)
             tag_pattern = re.compile(r"<[^>]+>")
             description = tag_pattern.sub(" ", desc_raw)
             description = " ".join(description.split())
-            
-        employment_type = ""
-        emp_match = re.search(r'<li[^>]*class="[^"]*description__job-criteria-item[^"]*"[^>]*>.*?Employment type.*?<span[^>]*class="[^"]*description__job-criteria-text[^"]*"[^>]*>(.*?)</span>', body, re.IGNORECASE | re.DOTALL)
-        if emp_match:
-            employment_type = emp_match.group(1).strip()
-            
+
+        criteria = {}
+        for item in re.finditer(
+            r'<li[^>]*class="[^"]*description__job-criteria-item[^"]*"[^>]*>(.*?)</li>',
+            body,
+            re.IGNORECASE | re.DOTALL
+        ):
+            inner = item.group(1)
+            h_match = re.search(
+                r'<h3[^>]*description__job-criteria-subheader[^>]*>(.*?)</h3>',
+                inner,
+                re.IGNORECASE | re.DOTALL
+            )
+            v_match = re.search(
+                r'<span[^>]*description__job-criteria-text[^>]*>(.*?)</span>',
+                inner,
+                re.IGNORECASE | re.DOTALL
+            )
+            if h_match and v_match:
+                hdr = " ".join(re.sub(r'<[^>]+>', ' ', h_match.group(1)).split()).lower()
+                val = " ".join(re.sub(r'<[^>]+>', ' ', v_match.group(1)).split())
+                criteria[hdr] = val
+
+        employment_type = criteria.get("employment type", "")
+
         remote = None
         if "remote" in location.lower() or "remote" in title.lower():
             remote = True
-            
+
         return RawSourceJob(
             source=self.source.value,
             external_job_id=expected_external_job_id,
@@ -410,7 +472,7 @@ class LinkedInCollector:
             posted_at=None,
             source_updated_at=None,
             skills=(),
-            raw_data={"body": body[:500]},
+            raw_data={"criteria": criteria},
         )
 
     @staticmethod

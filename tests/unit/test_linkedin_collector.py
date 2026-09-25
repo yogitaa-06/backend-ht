@@ -56,7 +56,7 @@ async def test_linkedin_collector_parses_structured_job() -> None:
 
         jobs = await collector.fetch_details(
             _target(),
-            [DiscoveredSourceJob(JobSource.LINKEDIN.value, "123456789", "Python Developer")]
+            [DiscoveredSourceJob(JobSource.LINKEDIN.value, "123456789", "Python Developer", "https://www.linkedin.com/jobs/view/123456789")]
         )
 
     assert len(jobs) == 1
@@ -68,36 +68,45 @@ async def test_linkedin_collector_parses_structured_job() -> None:
     assert job.title == "Python Developer"
     assert job.company == "Example Tech"
     assert job.location == "Austin, TX, US"
-    assert job.url == "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/123456789"
+    assert job.url == "https://www.linkedin.com/jobs/view/123456789"
     assert job.description == "Requires 2-4 years of experience."
     assert job.employment_type == "FULL_TIME"
     assert job.remote is None
     assert job.posted_at is None
-    assert "body" in job.raw_data
+    assert "criteria" in job.raw_data
 
 
 @pytest.mark.anyio
 async def test_linkedin_collector_deduplicates_results(caplog: pytest.LogCaptureFixture) -> None:
-    html = """
-    <html>
-      <body>
-        <ul class="jobs-search__results-list">
-          <!-- Case 1: Plain ID -->
-          <li><a class="base-card__full-link" href="/jobs/view/4419969671">Job 1</a></li>
-          <!-- Case 2: Slug with ID -->
-          <li><a class="base-card__full-link" href="/jobs/view/senior-software-engineer-at-company-4419969671">Job 2</a></li>
-          <!-- Case 3: Absolute URL with query params -->
-          <li><a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/software-engineer-at-company-4419969671?position=2&pageNum=0">Job 3</a></li>
-          <!-- Case 4: Query parameter shouldn't become ID -->
-          <li><a class="base-card__full-link" href="/jobs/view/some-job-4419969672?position=2">Job 4</a></li>
-          <!-- Case 5: Malformed URL without valid trailing ID -->
-          <li><a class="base-card__full-link" href="/jobs/view/bad-url-no-id">Job 5</a></li>
-          <!-- Deduplication: same ID as Job 1 -->
-          <li><a class="base-card__full-link" href="/jobs/view/duplicate-job-4419969671">Duplicate</a></li>
-        </ul>
-      </body>
-    </html>
-    """
+    html = (
+        "<html>\n"
+        "  <body>\n"
+        '    <ul class="jobs-search__results-list">\n'
+        '      <!-- Case 0: data-entity-urn present -->\n'
+        '      <li data-entity-urn="urn:li:jobPosting:9999999999"><a class="base-card__full-link" '
+        'href="/jobs/view/something-9999999999">Job 0</a></li>\n'
+        '      <!-- Case 1: Plain ID -->\n'
+        '      <li><a class="base-card__full-link" href="/jobs/view/4419969671">Job 1</a></li>\n'
+        '      <!-- Case 2: Slug with ID -->\n'
+        '      <li><a class="base-card__full-link" '
+        'href="/jobs/view/senior-software-engineer-at-company-4419969671">Job 2</a></li>\n'
+        '      <!-- Case 3: Absolute URL with query params -->\n'
+        '      <li><a class="base-card__full-link" '
+        'href="https://www.linkedin.com/jobs/view/software-engineer-at-company-4419969671"\n'
+        ' "?position=2&pageNum=0">Job 3</a></li>\n'
+        '      <!-- Case 4: Query parameter shouldn\'t become ID -->\n'
+        '      <li><a class="base-card__full-link" '
+        'href="/jobs/view/some-job-4419969672?position=2">Job 4</a></li>\n'
+        '      <!-- Case 5: Malformed URL without valid trailing ID -->\n'
+        '      <li><a class="base-card__full-link" '
+        'href="/jobs/view/bad-url-no-id">Job 5</a></li>\n'
+        '      <!-- Deduplication: same ID as Job 1 -->\n'
+        '      <li><a class="base-card__full-link" '
+        'href="/jobs/view/duplicate-job-4419969671">Duplicate</a></li>\n'
+        "    </ul>\n"
+        "  </body>\n"
+        "</html>"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -113,14 +122,17 @@ async def test_linkedin_collector_deduplicates_results(caplog: pytest.LogCapture
         )
         jobs = await collector.discover(_target())
 
-    # ID extracted should be 4419969671 and 4419969672.
-    assert len(jobs) == 2
-    assert jobs[0].external_job_id == "4419969671"
-    assert jobs[0].url == "https://www.linkedin.com/jobs/view/4419969671"
-    
-    assert jobs[1].external_job_id == "4419969672"
-    assert jobs[1].url == "https://www.linkedin.com/jobs/view/some-job-4419969672"
-    
+    # ID extracted should be 9999999999, 4419969671 and 4419969672.
+    assert len(jobs) == 3
+    assert jobs[0].external_job_id == "9999999999"
+    assert jobs[0].url == "https://www.linkedin.com/jobs/view/something-9999999999"
+
+    assert jobs[1].external_job_id == "4419969671"
+    assert jobs[1].url == "https://www.linkedin.com/jobs/view/4419969671"
+
+    assert jobs[2].external_job_id == "4419969672"
+    assert jobs[2].url == "https://www.linkedin.com/jobs/view/some-job-4419969672"
+
     # Check warning for malformed
     assert "linkedin_invalid_job_url_skipped" in caplog.text
 
