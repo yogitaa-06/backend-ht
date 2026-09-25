@@ -18,7 +18,7 @@ async def main() -> None:
     parser.add_argument(
         "--source",
         type=str,
-        choices=["dice", "linkedin", "glassdoor"],
+        choices=["dice", "linkedin", "glassdoor", "hiringcafe"],
         help="Source to scrape"
     )
     parser.add_argument("--all", action="store_true", help="Scrape all sources")

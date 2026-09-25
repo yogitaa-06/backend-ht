@@ -46,10 +46,12 @@ def build_collector_registry() -> CollectorRegistry:
     """Build the worker registry with implemented source collectors."""
     from app.jobs.sources.dice import DiceCollector
     from app.jobs.sources.glassdoor import GlassdoorCollector
+    from app.jobs.sources.hiringcafe import HiringCafeCollector
     from app.jobs.sources.linkedin import LinkedInCollector
 
     registry = CollectorRegistry()
     registry.register(DiceCollector())
     registry.register(LinkedInCollector())
     registry.register(GlassdoorCollector())
+    registry.register(HiringCafeCollector())
     return registry

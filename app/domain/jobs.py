@@ -32,6 +32,7 @@ class JobSource(StrEnum):
     DICE = "dice"
     LINKEDIN = "linkedin"
     GLASSDOOR = "glassdoor"
+    HIRINGCAFE = "hiringcafe"
 
 
 class GlobalJob(IdentityTimestampMixin, Base):
