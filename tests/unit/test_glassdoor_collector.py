@@ -7,7 +7,6 @@ import pytest
 
 from app.domain.jobs import JobSource
 from app.jobs.errors import SourceBlockedError, SourceRateLimitedError
-from app.jobs.normalization import DiscoveredSourceJob
 from app.jobs.registry import build_collector_registry
 from app.jobs.sources.glassdoor import GlassdoorCollector
 from app.jobs.targets import CollectionTarget
@@ -24,36 +23,18 @@ def _target(max_jobs: int = 10) -> CollectionTarget:
 
 @pytest.mark.anyio
 async def test_glassdoor_collector_parses_structured_job() -> None:
-    html = """
-    <html>
-      <body>
-        <script type="application/ld+json">
-        {
-          "@context": "https://schema.org",
-          "@type": "JobPosting",
-          "title": "Data Scientist",
-          "url": "https://www.glassdoor.com/job-listing/job?jl=987654321",
-          "datePosted": "2026-09-22T10:00:00.000Z",
-          "description": "Requires machine learning expertise.",
-          "employmentType": "FULL_TIME",
-          "hiringOrganization": {
-            "@type": "Organization",
-            "name": "Data Co"
-          },
-          "jobLocation": {
-            "@type": "Place",
-            "address": {
-              "@type": "PostalAddress",
-              "addressLocality": "New York",
-              "addressRegion": "NY",
-              "addressCountry": "US"
-            }
-          }
-        }
-        </script>
-      </body>
-    </html>
-    """
+    html = (
+        "<html>\n"
+        "  <body><!-- " + " " * 600 + " -->\n"
+        '    <script>self.__next_f.push([1, "{\\"jobview\\": {\\"jobTitleText\\": '
+        '\\"Data Scientist\\", \\"employerNameFromSearch\\": \\"Data Co\\", '
+        '\\"seoJobLink\\": \\"/job-listing/job?jl=987654321\\", \\"locationName\\": '
+        '\\"New York, NY\\", \\"listingId\\": 987654321, \\"p10\\": 100000, '
+        '\\"p90\\": 150000, \\"ageInDays\\": 2, \\"descriptionFragmentsText\\": '
+        '[\\"Requires machine learning expertise.\\"]}}"])</script>\n'
+        "  </body>\n"
+        "</html>"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -68,10 +49,9 @@ async def test_glassdoor_collector_parses_structured_job() -> None:
             request_delay_seconds=0,
         )
 
-        jobs = await collector.fetch_details(
-            _target(),
-            [DiscoveredSourceJob(JobSource.GLASSDOOR.value, "987654321", "Data Scientist")]
-        )
+        # Discover will fetch the page, parse jobs, and cache raw jobs
+        discovered = await collector.discover(_target())
+        jobs = await collector.fetch_details(_target(), discovered)
 
     assert len(jobs) == 1
 
@@ -81,34 +61,30 @@ async def test_glassdoor_collector_parses_structured_job() -> None:
     assert job.external_job_id == "987654321"
     assert job.title == "Data Scientist"
     assert job.company == "Data Co"
-    assert job.location == "New York, NY, US"
+    assert job.location == "New York, NY"
     assert job.url == "https://www.glassdoor.com/job-listing/job?jl=987654321"
     assert job.description == "Requires machine learning expertise."
-    assert job.employment_type == "FULL_TIME"
+    assert job.salary_text == "$100000 - $150000"
     assert job.posted_at is not None
     assert job.raw_data["url"] == "https://www.glassdoor.com/job-listing/job?jl=987654321"
 
 
 @pytest.mark.anyio
 async def test_glassdoor_collector_deduplicates_results() -> None:
-    html = """
-    <html>
-      <body>
-        <ul>
-          <li>
-            <a href="https://www.glassdoor.com/job-listing/job?jl=987654321">
-              Data Scientist
-            </a>
-          </li>
-          <li>
-            <a href="https://www.glassdoor.com/job-listing/job?jl=987654321">
-              Data Scientist
-            </a>
-          </li>
-        </ul>
-      </body>
-    </html>
-    """
+    html = (
+        "<html>\n"
+        "  <body><!-- " + " " * 600 + " -->\n"
+        '    <script>self.__next_f.push([1, "{\\"jobview\\": {\\"jobTitleText\\": '
+        '\\"Data Scientist\\", \\"employerNameFromSearch\\": \\"Data Co\\", '
+        '\\"seoJobLink\\": \\"/job-listing/job?jl=987654321\\", \\"locationName\\": '
+        '\\"New York, NY\\", \\"listingId\\": 987654321}}"])</script>\n'
+        '    <script>self.__next_f.push([1, "{\\"jobview\\": {\\"jobTitleText\\": '
+        '\\"Data Scientist\\", \\"employerNameFromSearch\\": \\"Data Co\\", '
+        '\\"seoJobLink\\": \\"/job-listing/job?jl=987654321\\", \\"locationName\\": '
+        '\\"New York, NY\\", \\"listingId\\": 987654321}}"])</script>\n'
+        "  </body>\n"
+        "</html>"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -130,7 +106,7 @@ async def test_glassdoor_collector_deduplicates_results() -> None:
 
 @pytest.mark.anyio
 async def test_glassdoor_collector_handles_empty_results() -> None:
-    html = "<html><body>No jobs</body></html>"
+    html = "<html><body><!-- " + " " * 600 + " -->No jobs</body></html>"
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -180,8 +156,30 @@ async def test_glassdoor_403_raises_blocked_error() -> None:
             await collector.discover(_target())
 
 
+@pytest.mark.anyio
+async def test_glassdoor_challenge_raises_blocked_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text='<html><body>cf-browser-verification</body></html>',
+            request=request
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        collector = GlassdoorCollector(
+            client=client,
+            request_delay_seconds=0,
+        )
+
+        with pytest.raises(SourceBlockedError):
+            await collector.discover(_target())
+
+
 def test_glassdoor_collector_is_registered() -> None:
     registry = build_collector_registry()
     assert registry.is_registered(JobSource.GLASSDOOR)
     collector = registry.resolve(JobSource.GLASSDOOR)
     assert collector.source is JobSource.GLASSDOOR
+
+
+

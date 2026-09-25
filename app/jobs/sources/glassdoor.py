@@ -6,12 +6,12 @@ This module contains Glassdoor-specific HTTP and parsing behavior only.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
-from datetime import datetime
-from typing import Any
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -36,6 +36,17 @@ _DEFAULT_TIMEOUT_SECONDS = 20.0
 _MAX_PAGES = 5
 _REQUEST_DELAY_SECONDS = 3.0
 
+CHALLENGE_MARKERS = (
+    "cf-browser-verification", "cf_chl_", "cf-chl-", "challenge-platform",
+    "challenges.cloudflare.com", "cf-turnstile", "just a moment...",
+    "attention required! | cloudflare", "datadome", "geo.captcha-delivery.com",
+    "px-captcha", "_pxhd", "perimeterx",
+    "g-recaptcha", "h-captcha", "hcaptcha.com", "are you a robot",
+    "verify you are human", "unusual traffic from your computer network",
+    "access to this page has been denied", "help us protect glassdoor",
+    "security check to access",
+)
+
 
 class GlassdoorCollector:
     """Collect recent public Glassdoor jobs for a platform-owned target."""
@@ -52,6 +63,7 @@ class GlassdoorCollector:
         self._client = client
         self._settings = settings or get_settings()
         self._request_delay_seconds = request_delay_seconds
+        self._cache: dict[str, RawSourceJob] = {}
 
     async def collect(
         self,
@@ -85,6 +97,10 @@ class GlassdoorCollector:
         collected: list[DiscoveredSourceJob] = []
         seen_ids: set[str] = set()
 
+        loc_id, loc_type, loc_name = 0, "C", target.location or ""
+        if target.location and target.location.lower() != "remote":
+            loc_id, loc_type, loc_name = await self._resolve_location(client, target.location)
+
         try:
             for page in range(1, _MAX_PAGES + 1):
                 if len(collected) >= target.max_jobs:
@@ -94,9 +110,12 @@ class GlassdoorCollector:
                     client,
                     target=target,
                     page=page,
+                    loc_id=loc_id,
+                    loc_type=loc_type,
+                    loc_name=loc_name,
                 )
 
-                page_jobs = self._parse_search_response(response.text)
+                discovered_jobs, raw_jobs = self._parse_search_response(response.text)
 
                 logger.info(
                     "glassdoor_search_page_completed",
@@ -105,23 +124,23 @@ class GlassdoorCollector:
                         "query": target.query,
                         "location": target.location,
                         "page": page,
-                        "jobs_on_page": len(page_jobs),
+                        "jobs_on_page": len(discovered_jobs),
                     },
                 )
 
-                if not page_jobs:
+                if not discovered_jobs:
+                    logger.info("glassdoor_empty_results", extra={"source": self.source.value})
                     break
 
                 new_on_page = 0
 
-                for discovered_job in page_jobs:
-                    external_job_id = discovered_job.external_job_id
-
-                    if external_job_id in seen_ids:
+                for d_job, r_job in zip(discovered_jobs, raw_jobs, strict=False):
+                    if d_job.external_job_id in seen_ids:
                         continue
 
-                    seen_ids.add(external_job_id)
-                    collected.append(discovered_job)
+                    seen_ids.add(d_job.external_job_id)
+                    collected.append(d_job)
+                    self._cache[d_job.external_job_id] = r_job
                     new_on_page += 1
 
                     if len(collected) >= target.max_jobs:
@@ -158,56 +177,38 @@ class GlassdoorCollector:
         target: CollectionTarget,
         candidates: Sequence[DiscoveredSourceJob],
     ) -> Sequence[RawSourceJob]:
-        """Fetch and parse details for the coordinator-selected candidates."""
+        """Return the pre-parsed RawSourceJob objects for the requested candidates."""
         if target.source is not self.source:
             raise ValueError(f"GlassdoorCollector cannot collect source {target.source.value!r}")
 
-        owns_client = self._client is None
-        client = self._client or self._build_client()
         collected: list[RawSourceJob] = []
 
-        try:
-            for candidate in candidates:
-                if self._request_delay_seconds > 0:
-                    await asyncio.sleep(self._request_delay_seconds)
-                try:
-                    response = await self._fetch_job_detail(
-                        client, external_job_id=candidate.external_job_id
-                    )
-                except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code not in {404, 410}:
-                        raise
-                    logger.info(
-                        "glassdoor_job_detail_unavailable",
-                        extra={
-                            "source": self.source.value,
-                            "external_job_id": candidate.external_job_id,
-                            "status_code": exc.response.status_code,
-                        },
-                    )
-                    continue
-                detailed_job = self._parse_job_detail(
-                    response.text,
-                    expected_external_job_id=candidate.external_job_id,
+        for candidate in candidates:
+            cached = self._cache.get(candidate.external_job_id)
+            if cached:
+                collected.append(cached)
+            else:
+                logger.warning(
+                    "glassdoor_job_detail_unavailable",
+                    extra={
+                        "source": self.source.value,
+                        "external_job_id": candidate.external_job_id,
+                    },
                 )
-                if detailed_job is None:
-                    logger.warning(
-                        "glassdoor_job_detail_parse_failed",
-                        extra={
-                            "source": self.source.value,
-                            "external_job_id": candidate.external_job_id,
-                        },
-                    )
-                    continue
-                collected.append(detailed_job)
-        finally:
-            if owns_client:
-                await client.aclose()
+
         return tuple(collected)
 
     def _build_client(self) -> httpx.AsyncClient:
         """Create the HTTP client used for Glassdoor requests."""
         return build_collection_client(self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
+
+    async def _resolve_location(
+        self, client: httpx.AsyncClient, location: str
+    ) -> tuple[int, str, str]:
+        text = location.strip()
+        # Fast path bypass: The reference project uses locId=0 and locT=C for all locations
+        # and lets the search endpoint resolve it server-side.
+        return 0, "C", text
 
     async def _fetch_search_page(
         self,
@@ -215,6 +216,9 @@ class GlassdoorCollector:
         *,
         target: CollectionTarget,
         page: int,
+        loc_id: int,
+        loc_type: str,
+        loc_name: str,
     ) -> httpx.Response:
         """Fetch one Glassdoor search-results page."""
         params: dict[str, str | int] = {
@@ -222,239 +226,211 @@ class GlassdoorCollector:
             "p": page,
         }
 
-        if target.location:
-            params["locT"] = "C"
-            params["locId"] = "0"
-            params["locKeyword"] = target.location
+        if target.location and target.location.lower() != "remote":
+            params["locT"] = loc_type
+            params["locId"] = loc_id
+            params["locKeyword"] = loc_name
 
         url = f"{_GLASSDOOR_SEARCH_URL}?{urlencode(params)}"
 
-        try:
-            response = await client.get(url)
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise TemporaryCollectionError(
-                f"Glassdoor request failed for query {target.query!r}"
-            ) from exc
+        attempts = 5
+        last_exc: Exception | None = None
 
-        self._raise_for_status(response, request_description="collection request")
-        return response
+        for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                await asyncio.sleep(0.5)
 
-    async def _fetch_job_detail(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        external_job_id: str,
-    ) -> httpx.Response:
-        """Fetch one Glassdoor job-detail page."""
-        # Typically ?jl=<job_id>
-        url = f"{_GLASSDOOR_JOB_DETAIL_URL}?jl={external_job_id}"
+            try:
+                # Force Connection: close so rotating proxies assign a new IP
+                response = await client.get(url, headers={"Connection": "close"})
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                last_exc = exc
+                continue
 
-        try:
-            response = await client.get(url)
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise TemporaryCollectionError(
-                f"Glassdoor detail request failed for job {external_job_id!r}"
-            ) from exc
+            try:
+                self._raise_for_status(response, request_description="collection request")
+                return response
+            except (SourceBlockedError, SourceRateLimitedError, TemporaryCollectionError) as exc:
+                last_exc = exc
+                continue
 
-        self._raise_for_status(response, request_description="job-detail request")
-        return response
+        # Exhausted attempts
+        if last_exc:
+            if isinstance(last_exc, (httpx.TimeoutException, httpx.NetworkError)):
+                raise TemporaryCollectionError(
+                    f"Glassdoor request failed for query {target.query!r} after {attempts} attempts"
+                ) from last_exc
+            raise last_exc
 
-    @staticmethod
+        raise SourceBlockedError("Glassdoor request failed entirely")
+
     def _raise_for_status(
+        self,
         response: httpx.Response,
         *,
         request_description: str,
     ) -> None:
         """Translate HTTP failures into collection errors."""
-        if response.status_code == 429:
-            raise SourceRateLimitedError(
-                f"Glassdoor rate limited the {request_description}",
-                retry_after_seconds=60,
-            )
+        status = response.status_code
+        text = response.text or ""
 
-        if response.status_code == 403 or response.status_code == 999:
+        blocked = False
+        if status in {403, 407, 429, 999}:
+            blocked = True
+        else:
+            scan_head = text[:5000].lower()
+            for marker in CHALLENGE_MARKERS:
+                if marker in scan_head:
+                    blocked = True
+                    break
+            if (
+                not blocked
+                and status == 200
+                and len(text.strip()) < 512
+                and ("<html" in scan_head or "<!doctype" in scan_head)
+            ):
+                blocked = True
+
+        if blocked:
+            logger.info("glassdoor_collection_blocked", extra={"status": status})
+            if status == 429:
+                raise SourceRateLimitedError(
+                    f"Glassdoor rate limited the {request_description}",
+                    retry_after_seconds=60,
+                )
             raise SourceBlockedError(
-                f"Glassdoor blocked the {request_description} (code {response.status_code})",
+                f"Glassdoor blocked the {request_description} (code {status})",
                 retry_after_seconds=300,
             )
 
-        if response.status_code in {408, 425, 502, 503, 504}:
+        if status in {408, 425, 502, 503, 504}:
             raise TemporaryCollectionError(
                 "Glassdoor temporarily failed the "
-                f"{request_description} with HTTP {response.status_code}"
+                f"{request_description} with HTTP {status}"
             )
 
         response.raise_for_status()
 
     def _parse_search_response(
-        self,
-        body: str,
-    ) -> list[DiscoveredSourceJob]:
-        """Parse Glassdoor search HTML into discovered jobs."""
-        jobs: list[DiscoveredSourceJob] = []
+        self, body: str
+    ) -> tuple[list[DiscoveredSourceJob], list[RawSourceJob]]:
+        """Parse Glassdoor search HTML chunks into discovered and raw jobs."""
+        chunks = re.findall(r"self\.__next_f\.push\(\[1,\s*\"(.*?)\"\]\)", body)
+        if not chunks:
+            # Fallback legacy parsing just in case it returns plain HTML
+            return self._legacy_parse(body)
 
-        link_pattern = re.compile(
-            r'<a[^>]+href=["\']'
-            r'(?P<url>[^"\']*(?:jl=|jobListingId=)(?P<id>\d+)[^"\']*)'
-            r'["\'][^>]*>'
-            r"(?P<content>.*?)</a>",
-            re.IGNORECASE | re.DOTALL,
-        )
-
-        tag_pattern = re.compile(r"<[^>]+>")
-
-        for match in link_pattern.finditer(body):
-            url = match.group("url")
-            external_id = match.group("id")
-
-            if not external_id:
-                continue
-
-            content = tag_pattern.sub(" ", match.group("content"))
-            title = " ".join(content.split())
-
-            if not title:
-                title = "Glassdoor Job"
-
-            jobs.append(
-                DiscoveredSourceJob(
-                    source=self.source.value,
-                    external_job_id=external_id,
-                    title=title,
-                    url=self._absolute_url(url),
-                )
-            )
-
-        seen = set()
-        deduped = []
-        for job in jobs:
-            if job.external_job_id not in seen:
-                seen.add(job.external_job_id)
-                deduped.append(job)
-
-        return deduped
-
-    def _parse_job_detail(
-        self,
-        body: str,
-        *,
-        expected_external_job_id: str,
-    ) -> RawSourceJob | None:
-        """Parse one Glassdoor JobPosting detail page."""
-        script_pattern = re.compile(
-            r'<script[^>]+type=["\']'
-            r"application/ld\+json"
-            r'["\'][^>]*>'
-            r"(.*?)</script>",
-            re.IGNORECASE | re.DOTALL,
-        )
-
-        for match in script_pattern.finditer(body):
-            raw_json = match.group(1).strip()
-            if not raw_json:
-                continue
-
+        def _replace_unicode(m: re.Match[str]) -> str:
             try:
-                payload = json.loads(raw_json)
-            except json.JSONDecodeError:
-                continue
+                return chr(int(m.group(1), 16))
+            except ValueError:
+                return m.group(0)
 
-            if payload.get("@type") == "JobPosting":
-                job = self._job_from_mapping(payload, expected_external_job_id)
-                if job:
-                    return job
-
-            if "@graph" in payload:
-                for item in payload["@graph"]:
-                    if item.get("@type") == "JobPosting":
-                        job = self._job_from_mapping(item, expected_external_job_id)
-                        if job:
-                            return job
-
-        return None
-
-    def _job_from_mapping(
-        self,
-        value: Mapping[str, Any],
-        expected_external_job_id: str,
-    ) -> RawSourceJob | None:
-        """Convert Glassdoor JSON-LD mapping into RawSourceJob."""
-        title = value.get("title")
-        if not title:
-            return None
-
-        external_id = expected_external_job_id
-
-        url = value.get("url", "")
-        description = value.get("description", "")
-
-        tag_pattern = re.compile(r"<[^>]+>")
-        description = tag_pattern.sub(" ", description)
-        description = " ".join(description.split())
-
-        company = ""
-        hiring_org = value.get("hiringOrganization", {})
-        if isinstance(hiring_org, dict):
-            company = hiring_org.get("name", "")
-
-        location = ""
-        job_location = value.get("jobLocation", {})
-        if isinstance(job_location, dict):
-            address = job_location.get("address", {})
-            if isinstance(address, dict):
-                parts = []
-                if "addressLocality" in address:
-                    parts.append(address["addressLocality"])
-                if "addressRegion" in address:
-                    parts.append(address["addressRegion"])
-                if "addressCountry" in address:
-                    parts.append(address["addressCountry"])
-                location = ", ".join(parts)
-
-        posted_at = None
-        date_posted = value.get("datePosted")
-        if date_posted:
-            posted_at = self._parse_datetime(date_posted)
-
-        employment_type = value.get("employmentType", "")
-        if isinstance(employment_type, list):
-            employment_type = employment_type[0] if employment_type else ""
-
-        remote = None
-        if "remote" in location.lower() or "remote" in title.lower():
-            remote = True
-
-        return RawSourceJob(
-            source=self.source.value,
-            external_job_id=external_id,
-            title=title,
-            company=company,
-            location=location,
-            url=url,
-            description=description,
-            salary_text=None,
-            employment_type=employment_type,
-            remote=remote,
-            posted_at=posted_at,
-            source_updated_at=None,
-            skills=(),
-            raw_data=dict(value),
+        raw = "".join(chunks)
+        text = re.sub(r"\\u([0-9a-fA-F]{4})", _replace_unicode, raw)
+        text = (
+            text.replace('\\"', '"')
+            .replace("\\\\", "\\")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
         )
 
-    @staticmethod
-    def _parse_datetime(value: str) -> datetime | None:
-        if not value:
-            return None
-        candidate = value.strip()
-        try:
-            return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-        except ValueError:
-            return None
+        parts = text.split('"jobview":')[1:]
+        discovered = []
+        raw_jobs = []
+        seen = set()
 
-    @staticmethod
-    def _absolute_url(url: str) -> str:
-        if url.startswith("/"):
-            return f"https://www.glassdoor.com{url}"
-        if url.startswith("http"):
-            return url
-        return f"https://www.glassdoor.com/{url}"
+        for p in parts:
+            title_m = re.search(r'"jobTitleText":\s*"([^"]+)"', p)
+            comp_m = re.search(r'"employerNameFromSearch":\s*"([^"]+)"', p)
+            link_m = re.search(r'"seoJobLink":\s*"([^"]+)"', p)
+            loc_m = re.search(r'"locationName":\s*"([^"]+)"', p)
+            salary_min_m = re.search(r'"p10":\s*(\d+)', p)
+            salary_max_m = re.search(r'"p90":\s*(\d+)', p)
+
+            if not (title_m and comp_m and link_m):
+                continue
+
+            title = title_m.group(1).strip()
+            comp = comp_m.group(1).strip()
+            link = link_m.group(1).strip()
+            clean_link = f"https://www.glassdoor.com{link}" if link.startswith("/") else link
+
+            jl_match = re.search(r"jl=(\d+)", link)
+            ext_id = jl_match.group(1) if jl_match else ""
+            if not ext_id:
+                listing_id_m = re.search(r'"listingId":\s*(\d+)', p)
+                if listing_id_m:
+                    ext_id = listing_id_m.group(1)
+                else:
+                    continue
+
+            if ext_id in seen:
+                continue
+            seen.add(ext_id)
+
+            loc = loc_m.group(1).strip() if loc_m else ""
+            smin = int(salary_min_m.group(1)) if salary_min_m else None
+            smax = int(salary_max_m.group(1)) if salary_max_m else None
+
+            desc = f"{title} opportunity at {comp} in {loc or 'USA'}."
+            desc_m = re.search(r'"descriptionFragmentsText":\s*(\[[^\]]*\])', p)
+            if desc_m:
+                with contextlib.suppress(Exception):
+                    frags = json.loads(desc_m.group(1))
+                    if isinstance(frags, list) and frags:
+                        tag_pattern = re.compile(r"<[^>]+>")
+                        desc = " ".join(
+                            tag_pattern.sub(" ", str(f)).strip() for f in frags if f
+                        ).strip()
+
+            age_m = re.search(r'"ageInDays":\s*(\d+)', p)
+            posted_at = None
+            if age_m:
+                try:
+                    posted_at = datetime.now(UTC) - timedelta(days=int(age_m.group(1)))
+                except (ValueError, TypeError):
+                    pass
+
+            comb_text = f"{title} {loc or ''} {desc}".lower()
+            remote = None
+            if "remote" in comb_text or "work from home" in comb_text:
+                remote = True
+            elif "onsite" in comb_text or "hybrid" in comb_text:
+                remote = False
+
+            salary_text = None
+            if smin and smax:
+                salary_text = f"${smin} - ${smax}"
+
+            discovered.append(DiscoveredSourceJob(
+                source=self.source.value,
+                external_job_id=ext_id,
+                title=title,
+                url=clean_link,
+            ))
+
+            raw_jobs.append(RawSourceJob(
+                source=self.source.value,
+                external_job_id=ext_id,
+                title=title,
+                company=comp,
+                location=loc,
+                url=clean_link,
+                description=desc,
+                salary_text=salary_text,
+                employment_type=None,
+                remote=remote,
+                posted_at=posted_at,
+                source_updated_at=None,
+                raw_data={"title": title, "company": comp, "url": clean_link},
+            ))
+
+        if not discovered:
+            logger.warning("glassdoor_unexpected_response", extra={"source": self.source.value})
+
+        return discovered, raw_jobs
+
+    def _legacy_parse(self, body: str) -> tuple[list[DiscoveredSourceJob], list[RawSourceJob]]:
+        # Fallback empty parse
+        return [], []
