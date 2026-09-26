@@ -8,14 +8,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from arq.connections import ArqRedis
-from sqlalchemy import select
 
 from app.core.config import Settings
-from app.db.session import Database
 from app.domain.jobs import JobSource
+from app.domain.profiles import Profile
 from app.domain.resumes import CandidateProfile, Resume, ResumeStatus
+from app.db.session import Database
 from app.jobs.registry import CollectorRegistry
 from app.jobs.targets import CollectionTarget
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,10 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
     redis: ArqRedis = ctx["redis"]
     registry: CollectorRegistry = ctx["collector_registry"]
     database: Database | None = ctx.get("database")
-
+    
     # 1. Build dynamic targets from active user resumes
     dynamic_targets: list[CollectionTarget] = []
-
+    
     if database is not None:
         async with database.sessions() as session:
             profiles_result = await session.execute(
@@ -95,13 +96,8 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
                 .where(Resume.deleted_at.is_(None), Resume.status == ResumeStatus.PARSED)
             )
             for profile in profiles_result.scalars():
-                query_sources = [
-                    JobSource.DICE,
-                    JobSource.LINKEDIN,
-                    JobSource.GLASSDOOR,
-                    JobSource.HIRINGCAFE,
-                ]
-
+                query_sources = [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.HIRINGCAFE]
+                
                 # Priority 1: Current Title
                 if profile.current_title:
                     for src in query_sources:
@@ -109,10 +105,10 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
                             CollectionTarget(
                                 source=src,
                                 query=profile.current_title,
-                                location=profile.location or "United States",
+                                location=profile.location or "United States"
                             )
                         )
-
+                
                 # Priority 2: Top Skills (if they have them)
                 if profile.skills:
                     top_skills = " ".join(profile.skills[:3])
@@ -122,20 +118,20 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
                                 CollectionTarget(
                                     source=src,
                                     query=top_skills,
-                                    location=profile.location or "United States",
+                                    location=profile.location or "United States"
                                 )
                             )
     else:
         dynamic_targets.extend(enabled_targets(settings))
-
+    
     # 2. Combine and deduplicate
     unique_targets: dict[str, CollectionTarget] = {}
-
+        
     # Add dynamic targets
     for target in dynamic_targets:
         if target.enabled:
             unique_targets.setdefault(target.identity, target)
-
+            
     # Fallback to enabled_targets or software engineer @ United States if NO targets were generated
     if not unique_targets:
         fallback = enabled_targets(settings)
@@ -143,17 +139,14 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
             for t in fallback:
                 unique_targets.setdefault(t.identity, t)
         else:
-            for src in (
-                JobSource.DICE,
-                JobSource.LINKEDIN,
-                JobSource.GLASSDOOR,
-                JobSource.HIRINGCAFE,
-            ):
+            for src in [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.HIRINGCAFE]:
                 t = CollectionTarget(
-                    source=src, query="software engineer", location="United States"
+                    source=src,
+                    query="software engineer",
+                    location="United States"
                 )
                 unique_targets.setdefault(t.identity, t)
-
+            
     # Limit to MAX_QUERIES = 100 per source
     grouped: dict[JobSource, list[CollectionTarget]] = defaultdict(list)
     for target in unique_targets.values():
@@ -177,8 +170,7 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
         if not claimed:
             continue
 
-        batch_size = getattr(settings, "glassdoor_collection_batch_size", 0)
-        if source == JobSource.GLASSDOOR and batch_size > 0:
+        if source == JobSource.GLASSDOOR and getattr(settings, "glassdoor_collection_batch_size", 0) > 0:
             active_targets = await _rotate_queries(
                 redis,
                 source.value,

@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from app.jobs.matching import Candidate, MatchableJob
 
 from app.domain.resumes import CandidateProfile
-from app.jobs.matching import Candidate, MatchableJob
 from app.jobs.service import JobService
 
 
@@ -28,8 +28,7 @@ async def test_search_delegates_to_job_repo(
     job_service: JobService, mock_job_repo: AsyncMock
 ) -> None:
     session = AsyncMock()
-    search_res: tuple[list[MatchableJob], int] = ([], 0)
-    mock_job_repo.search.return_value = search_res
+    mock_job_repo.search.return_value: tuple[list[MatchableJob], int] = ([], 0)
 
     rows, total = await job_service.search(
         session,
@@ -107,7 +106,7 @@ async def test_get_recommendations_ranks_and_paginates(
     mock_job_repo.search.return_value = ([job1, job2, job3], 3)
 
     # Only job1 and job2 are eligible
-    mock_is_eligible.side_effect = lambda candidate, job: job.id in (job1.id, job2.id)
+    mock_is_eligible.side_effect = lambda candidate, job: job.id in (job1.id, job2.id)  # type: ignore
 
     # Rank job2 higher than job1
     def fake_rank(candidate: Candidate, job: MatchableJob) -> dict[str, float]:

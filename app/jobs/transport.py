@@ -23,20 +23,19 @@ def build_collection_client(
     """
     proxy_url = (
         settings.job_collection_proxy_url.get_secret_value()
-        if settings.job_collection_proxy_url
-        else None
+        if settings.job_collection_proxy_url else None
     )
-
+    
     transport_kwargs: dict[str, Any] = {
         "retries": 3,
     }
-
+    
     transport: httpx.AsyncBaseTransport
     if proxy_url:
         transport = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(proxy_url), **transport_kwargs)
     else:
         transport = httpx.AsyncHTTPTransport(**transport_kwargs)
-
+        
     return httpx.AsyncClient(
         transport=transport,
         timeout=httpx.Timeout(timeout_seconds),

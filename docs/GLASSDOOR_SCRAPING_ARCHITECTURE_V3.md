@@ -81,7 +81,9 @@ Unlike Dice (which runs all active queries at once), Glassdoor uses **controlled
 ```python
 async def run_glassdoor_scheduled_ingest(ctx: dict[str, Any]) -> dict[str, Any]:
     """Cron task: sweep Glassdoor jobs using resume-driven queries (batched to 6 queries)."""
-    return await _run_smart_ingest(ctx, source_name="glassdoor", per_query_limit=30, batch_size=6)
+    return await _run_smart_ingest(
+        ctx, source_name="glassdoor", per_query_limit=30, batch_size=6
+    )
 ```
 
 #### Why Batch to 6 Queries?
@@ -104,13 +106,11 @@ In `app/scrapers/sources/glassdoor.py`:
 def _make_default_session_factory(impersonate: str):
     def make(proxy_url: str | None):
         from curl_cffi.requests import AsyncSession
-
         return AsyncSession(
             impersonate="chrome124",  # Mimics exact Chrome 124 TLS ClientHello & headers
             proxies={"http": proxy_url, "https": proxy_url} if proxy_url else None,
             timeout=35,
         )
-
     return make
 ```
 
@@ -124,16 +124,9 @@ Configured with residential proxy networks (e.g. DataImpulse):
 Before parsing, every response is scanned for anti-bot challenge signatures:
 ```python
 CF_CHALLENGE_MARKERS = (
-    "cf-browser-verification",
-    "cf_chl_",
-    "cf-chl-",
-    "challenge-platform",
-    "challenges.cloudflare.com",
-    "cf-turnstile",
-    "just a moment...",
-    "attention required! | cloudflare",
-    "datadome",
-    "geo.captcha-delivery.com",
+    "cf-browser-verification", "cf_chl_", "cf-chl-", "challenge-platform",
+    "challenges.cloudflare.com", "cf-turnstile", "just a moment...",
+    "attention required! | cloudflare", "datadome", "geo.captcha-delivery.com"
 )
 ```
 If a challenge is detected:

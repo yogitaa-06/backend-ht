@@ -12,7 +12,6 @@ import logging
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -38,27 +37,13 @@ _MAX_PAGES = 5
 _REQUEST_DELAY_SECONDS = 3.0
 
 CHALLENGE_MARKERS = (
-    "cf-browser-verification",
-    "cf_chl_",
-    "cf-chl-",
-    "challenge-platform",
-    "challenges.cloudflare.com",
-    "cf-turnstile",
-    "just a moment...",
-    "attention required! | cloudflare",
-    "datadome",
-    "geo.captcha-delivery.com",
-    "px-captcha",
-    "_pxhd",
-    "perimeterx",
-    "g-recaptcha",
-    "h-captcha",
-    "hcaptcha.com",
-    "are you a robot",
-    "verify you are human",
-    "unusual traffic from your computer network",
-    "access to this page has been denied",
-    "help us protect glassdoor",
+    "cf-browser-verification", "cf_chl_", "cf-chl-", "challenge-platform",
+    "challenges.cloudflare.com", "cf-turnstile", "just a moment...",
+    "attention required! | cloudflare", "datadome", "geo.captcha-delivery.com",
+    "px-captcha", "_pxhd", "perimeterx",
+    "g-recaptcha", "h-captcha", "hcaptcha.com", "are you a robot",
+    "verify you are human", "unusual traffic from your computer network",
+    "access to this page has been denied", "help us protect glassdoor",
     "security check to access",
     "<title>just a moment",
     "<title>security | glassdoor",
@@ -231,7 +216,7 @@ class GlassdoorCollector:
         try:
             from curl_cffi.requests import AsyncSession
 
-            proxies: Any = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+            proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
             impersonate = getattr(self._settings, "glassdoor_impersonate", "chrome124")
             return AsyncSession(
                 impersonate=impersonate,
@@ -239,10 +224,16 @@ class GlassdoorCollector:
                 timeout=int(_DEFAULT_TIMEOUT_SECONDS),
             )
         except Exception as exc:
-            logger.warning("glassdoor_curl_cffi_fallback_to_httpx", extra={"error": str(exc)})
-            return build_collection_client(self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
+            logger.warning(
+                "glassdoor_curl_cffi_fallback_to_httpx", extra={"error": str(exc)}
+            )
+            return build_collection_client(
+                self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS
+            )
 
-    async def _resolve_location(self, client: Any, location: str) -> tuple[int, str, str]:
+    async def _resolve_location(
+        self, client: Any, location: str
+    ) -> tuple[int, str, str]:
         text = location.strip()
         # Fast path bypass: The reference project uses locId=0 and locT=C for all locations
         # and lets the search endpoint resolve it server-side.
@@ -299,11 +290,7 @@ class GlassdoorCollector:
 
         # Exhausted attempts
         if last_exc:
-            is_net_error = (
-                isinstance(last_exc, (httpx.TimeoutException, httpx.NetworkError))
-                or "curl" in type(last_exc).__module__.lower()
-            )
-            if is_net_error:
+            if isinstance(last_exc, (httpx.TimeoutException, httpx.NetworkError)) or "curl" in type(last_exc).__module__.lower():
                 raise TemporaryCollectionError(
                     f"Glassdoor request failed for query {target.query!r} after {attempts} attempts"
                 ) from last_exc
@@ -353,7 +340,8 @@ class GlassdoorCollector:
 
         if status in {408, 425, 502, 503, 504}:
             raise TemporaryCollectionError(
-                f"Glassdoor temporarily failed the {request_description} with HTTP {status}"
+                "Glassdoor temporarily failed the "
+                f"{request_description} with HTTP {status}"
             )
 
         response.raise_for_status()
@@ -376,7 +364,10 @@ class GlassdoorCollector:
         raw = "".join(chunks)
         text = re.sub(r"\\u([0-9a-fA-F]{4})", _replace_unicode, raw)
         text = (
-            text.replace('\\"', '"').replace("\\\\", "\\").replace("\\n", "\n").replace("\\t", "\t")
+            text.replace('\\"', '"')
+            .replace("\\\\", "\\")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
         )
 
         parts = text.split('"jobview":')[1:]
@@ -447,39 +438,35 @@ class GlassdoorCollector:
             if smin and smax:
                 salary_text = f"${smin} - ${smax}"
 
-            discovered.append(
-                DiscoveredSourceJob(
-                    source=self.source.value,
-                    external_job_id=ext_id,
-                    title=title,
-                    url=clean_link,
-                )
-            )
+            discovered.append(DiscoveredSourceJob(
+                source=self.source.value,
+                external_job_id=ext_id,
+                title=title,
+                url=clean_link,
+            ))
 
-            raw_jobs.append(
-                RawSourceJob(
-                    source=self.source.value,
-                    external_job_id=ext_id,
-                    title=title,
-                    company=comp,
-                    location=loc,
-                    url=clean_link,
-                    description=desc,
-                    salary_text=salary_text,
-                    employment_type=None,
-                    remote=remote,
-                    posted_at=posted_at,
-                    source_updated_at=None,
-                    raw_data={
-                        "title": title,
-                        "company": comp,
-                        "url": clean_link,
-                        "salary_min": smin,
-                        "salary_max": smax,
-                        "salary_currency": "USD",
-                    },
-                )
-            )
+            raw_jobs.append(RawSourceJob(
+                source=self.source.value,
+                external_job_id=ext_id,
+                title=title,
+                company=comp,
+                location=loc,
+                url=clean_link,
+                description=desc,
+                salary_text=salary_text,
+                employment_type=None,
+                remote=remote,
+                posted_at=posted_at,
+                source_updated_at=None,
+                raw_data={
+                    "title": title,
+                    "company": comp,
+                    "url": clean_link,
+                    "salary_min": smin,
+                    "salary_max": smax,
+                    "salary_currency": "USD",
+                },
+            ))
 
         if not discovered:
             logger.warning("glassdoor_unexpected_response", extra={"source": self.source.value})

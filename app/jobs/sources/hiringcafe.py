@@ -99,9 +99,7 @@ class HiringCafeCollector:
                             title = base_title or "Unknown Title"
                             company = v5.get("company_name")
                             location = v5.get("formatted_workplace_location")
-                            url = (
-                                hit.get("apply_url") or f"https://hiringcafe.com/job/{external_id}"
-                            )
+                            url = hit.get("apply_url") or f"https://hiringcafe.com/job/{external_id}"
 
                             commitment = v5.get("commitment")
                             emp_type = commitment[0] if commitment else None

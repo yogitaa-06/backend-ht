@@ -163,7 +163,9 @@ async def test_glassdoor_403_raises_blocked_error() -> None:
 async def test_glassdoor_challenge_raises_blocked_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            200, text="<html><body>cf-browser-verification</body></html>", request=request
+            200,
+            text='<html><body>cf-browser-verification</body></html>',
+            request=request
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -188,10 +190,7 @@ async def test_glassdoor_html_title_challenge_raises_blocked_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            text=(
-                "<html><head><title>Just a moment...</title></head>"
-                "<body>Verify you are human</body></html>"
-            ),
+            text="<html><head><title>Just a moment...</title></head><body>Verify you are human</body></html>",
             request=request,
         )
 
@@ -210,12 +209,13 @@ def test_glassdoor_collector_builds_curl_cffi_client() -> None:
     client = collector._build_client()
     try:
         from curl_cffi.requests import AsyncSession
-
         assert isinstance(client, AsyncSession)
     finally:
         import asyncio
-
         if hasattr(client, "close"):
             res = client.close()
             if asyncio.iscoroutine(res):
                 asyncio.run(res)
+
+
+

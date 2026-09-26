@@ -56,7 +56,7 @@ _FLIGHT_PUSH_RE = re.compile(
 
 def _iter_flight_chunks(html_content: str) -> list[str]:
     """Extract pushed JSON payload strings from Next.js RSC flight push scripts.
-
+    
     Modern Dice uses Next.js React Server Components (RSC). Search listings are
     streamed in <script>self.__next_f.push([...])</script> tags as chunked arrays.
     """

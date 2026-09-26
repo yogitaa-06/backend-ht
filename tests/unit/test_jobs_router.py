@@ -1,4 +1,3 @@
-from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -11,6 +10,7 @@ from app.auth.dependencies import get_current_profile
 from app.db.session import get_session
 from app.domain.profiles import Profile
 from app.jobs.service import get_job_service
+from typing import cast, List
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def app_client(mock_job_service: AsyncMock) -> TestClient:
 def test_search_jobs_delegates_to_service(
     app_client: TestClient, mock_job_service: AsyncMock
 ) -> None:
-    mock_job_service.search.return_value = (cast(list[tuple[object, dict[str, float]]], []), 0)
+    mock_job_service.search.return_value = (cast(List[tuple[object, dict[str, float]]], []), 0)
 
     response = app_client.get("/jobs?query=python&page=1&page_size=20")
 
@@ -50,10 +50,7 @@ def test_search_jobs_delegates_to_service(
 def test_recommended_jobs_delegates_to_service(
     app_client: TestClient, mock_job_service: AsyncMock
 ) -> None:
-    mock_job_service.get_recommendations.return_value = (
-        cast(list[tuple[object, dict[str, float]]], []),
-        0,
-    )
+    mock_job_service.get_recommendations.return_value = (cast(List[tuple[object, dict[str, float]]], []), 0)
 
     response = app_client.get("/jobs/recommended?page=2&page_size=10")
 

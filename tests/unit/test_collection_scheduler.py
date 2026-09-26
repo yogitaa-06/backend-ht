@@ -148,7 +148,8 @@ async def test_scheduler_batches_glassdoor_targets() -> None:
     settings = collection_settings(
         glassdoor_collection_batch_size=2,
         job_collection_targets=[
-            {"source": "glassdoor", "query": f"role_{i}", "max_jobs": 10} for i in range(5)
+            {"source": "glassdoor", "query": f"role_{i}", "max_jobs": 10}
+            for i in range(5)
         ],
     )
 
