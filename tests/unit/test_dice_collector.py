@@ -238,20 +238,21 @@ def test_dice_collector_is_registered() -> None:
 
 @pytest.mark.anyio
 async def test_dice_collector_parses_flight_push_chunks() -> None:
-    html = """
-    <html>
-      <body>
-        <script>
-          self.__next_f.push([1, "some-prefix:{\\"jobList\\":{\\"data\\":[{\\"guid\\":\\"11111111-2222-3333-4444-555555555555\\",\\"title\\":\\"Senior Python Developer\\",\\"detailsPageUrl\\":\\"https://www.dice.com/job-detail/11111111-2222-3333-4444-555555555555\\"}]}}"]);
-        </script>
-      </body>
-    </html>
-    """
+    guid = "11111111-2222-3333-4444-555555555555"
+    url = f"https://www.dice.com/job-detail/{guid}"
+    payload = (
+        r"some-prefix:{\"jobList\":{\"data\":[{\"guid\":\""
+        + guid
+        + r"\",\"title\":\"Senior Python Developer\",\"detailsPageUrl\":\""
+        + url
+        + r"\"}]}}"
+    )
+    html = f'<html><body><script>self.__next_f.push([1, "{payload}"]);</script></body></html>'
     collector = DiceCollector(request_delay_seconds=0)
     discovered = collector._parse_search_response(html)
 
     assert len(discovered) == 1
-    assert discovered[0].external_job_id == "11111111-2222-3333-4444-555555555555"
+    assert discovered[0].external_job_id == guid
     assert discovered[0].title == "Senior Python Developer"
 
 

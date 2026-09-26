@@ -295,7 +295,7 @@ class LinkedInCollector:
         """Parse LinkedIn search HTML into discovered jobs."""
         jobs: list[DiscoveredSourceJob] = []
 
-        chunks = re.split(r'(?i)<li[^>]*>', body)
+        chunks = re.split(r"(?i)<li[^>]*>", body)
         tag_pattern = re.compile(r"<[^>]+>")
 
         for chunk in chunks:
@@ -303,9 +303,7 @@ class LinkedInCollector:
                 continue
 
             link_match = re.search(
-                r'<a[^>]+href=["\']([^"\']*/jobs/view/[^"\']*)["\']',
-                chunk,
-                re.IGNORECASE
+                r'<a[^>]+href=["\']([^"\']*/jobs/view/[^"\']*)["\']', chunk, re.IGNORECASE
             )
             if not link_match:
                 continue
@@ -320,7 +318,7 @@ class LinkedInCollector:
             if urn_match:
                 external_id = urn_match.group(1)
             else:
-                id_match = re.search(r'(?:-|/)(\d+)/?$', parsed_url.path)
+                id_match = re.search(r"(?:-|/)(\d+)/?$", parsed_url.path)
                 if id_match:
                     external_id = id_match.group(1)
                 else:
@@ -330,14 +328,12 @@ class LinkedInCollector:
                             "source": self.source.value,
                             "url": raw_url,
                             "path": parsed_url.path,
-                        }
+                        },
                     )
                     continue
 
             title_match = re.search(
-                r'<h3[^>]*base-search-card__title[^>]*>(.*?)</h3>',
-                chunk,
-                re.IGNORECASE | re.DOTALL
+                r"<h3[^>]*base-search-card__title[^>]*>(.*?)</h3>", chunk, re.IGNORECASE | re.DOTALL
             )
             if title_match:
                 title_raw = title_match.group(1)
@@ -345,7 +341,7 @@ class LinkedInCollector:
                 title_match_a = re.search(
                     r'<a[^>]+href=["\'][^"\']*["\'][^>]*>(.*?)</a>',
                     chunk,
-                    re.IGNORECASE | re.DOTALL
+                    re.IGNORECASE | re.DOTALL,
                 )
                 title_raw = title_match_a.group(1) if title_match_a else "LinkedIn Job"
 
@@ -381,7 +377,7 @@ class LinkedInCollector:
         title_match = re.search(
             r'<h2[^>]*class="[^"]*top-card-layout__title[^"]*"[^>]*>(.*?)</h2>',
             body,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
         if not title_match:
             return None
@@ -391,13 +387,13 @@ class LinkedInCollector:
         company_match = re.search(
             r'<a[^>]*class="[^"]*topcard__org-name-link[^"]*"[^>]*>(.*?)</a>',
             body,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
         if not company_match:
             company_match = re.search(
                 r'<span[^>]*class="[^"]*topcard__flavor[^"]*"[^>]*>(.*?)</span>',
                 body,
-                re.IGNORECASE | re.DOTALL
+                re.IGNORECASE | re.DOTALL,
             )
         if company_match:
             company = company_match.group(1).strip()
@@ -407,7 +403,7 @@ class LinkedInCollector:
             r'<span[^>]*class="[^"]*topcard__flavor topcard__flavor--bullet'
             r'[^"]*"[^>]*>(.*?)</span>',
             body,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
         if location_matches:
             location = location_matches[0].strip()
@@ -416,14 +412,14 @@ class LinkedInCollector:
         desc_match = re.search(
             r'<div[^>]*class="[^"]*show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>',
             body,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
         if not desc_match:
-             desc_match = re.search(
-                 r'<div[^>]*class="[^"]*description__text[^"]*"[^>]*>(.*?)</div>',
-                 body,
-                 re.IGNORECASE | re.DOTALL
-             )
+            desc_match = re.search(
+                r'<div[^>]*class="[^"]*description__text[^"]*"[^>]*>(.*?)</div>',
+                body,
+                re.IGNORECASE | re.DOTALL,
+            )
         if desc_match:
             desc_raw = desc_match.group(1)
             tag_pattern = re.compile(r"<[^>]+>")
@@ -434,22 +430,22 @@ class LinkedInCollector:
         for item in re.finditer(
             r'<li[^>]*class="[^"]*description__job-criteria-item[^"]*"[^>]*>(.*?)</li>',
             body,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         ):
             inner = item.group(1)
             h_match = re.search(
-                r'<h3[^>]*description__job-criteria-subheader[^>]*>(.*?)</h3>',
+                r"<h3[^>]*description__job-criteria-subheader[^>]*>(.*?)</h3>",
                 inner,
-                re.IGNORECASE | re.DOTALL
+                re.IGNORECASE | re.DOTALL,
             )
             v_match = re.search(
-                r'<span[^>]*description__job-criteria-text[^>]*>(.*?)</span>',
+                r"<span[^>]*description__job-criteria-text[^>]*>(.*?)</span>",
                 inner,
-                re.IGNORECASE | re.DOTALL
+                re.IGNORECASE | re.DOTALL,
             )
             if h_match and v_match:
-                hdr = " ".join(re.sub(r'<[^>]+>', ' ', h_match.group(1)).split()).lower()
-                val = " ".join(re.sub(r'<[^>]+>', ' ', v_match.group(1)).split())
+                hdr = " ".join(re.sub(r"<[^>]+>", " ", h_match.group(1)).split()).lower()
+                val = " ".join(re.sub(r"<[^>]+>", " ", v_match.group(1)).split())
                 criteria[hdr] = val
 
         employment_type = criteria.get("employment type", "")
