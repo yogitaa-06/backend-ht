@@ -44,6 +44,46 @@ _JOB_ID_PATTERN = re.compile(
     r"/job-detail/([A-Za-z0-9_-]+)",
     re.IGNORECASE,
 )
+_GUID_RE = re.compile(
+    r"/job-detail/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+_FLIGHT_PUSH_RE = re.compile(
+    r"self\.__next_f\.push\((\[.*?\])\)\s*;?\s*</script>",
+    re.DOTALL,
+)
+
+
+def _iter_flight_chunks(html_content: str) -> list[str]:
+    """Extract pushed JSON payload strings from Next.js RSC flight push scripts.
+    
+    Modern Dice uses Next.js React Server Components (RSC). Search listings are
+    streamed in <script>self.__next_f.push([...])</script> tags as chunked arrays.
+    """
+    chunks: list[str] = []
+    for match in _FLIGHT_PUSH_RE.finditer(html_content):
+        try:
+            pushed = json.loads(match.group(1))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(pushed, list) and len(pushed) >= 2 and isinstance(pushed[1], str):
+            chunks.append(pushed[1])
+    return chunks
+
+
+def _parse_flight_joblist(html_content: str) -> dict[str, Any] | None:
+    """Find and decode the embedded 'jobList' JSON object inside RSC flight chunks."""
+    for chunk in _iter_flight_chunks(html_content):
+        index = chunk.find('"jobList":')
+        if index == -1:
+            continue
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(chunk, index + len('"jobList":'))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("data"), list):
+            return obj
+    return None
 
 
 class DiceCollector:
@@ -236,10 +276,13 @@ class DiceCollector:
             "q": target.query,
             "page": page,
             "pageSize": _DEFAULT_PAGE_SIZE,
+            "filters.postedDate": "SEVEN",
         }
 
-        if target.location:
+        if target.location and target.location.lower() != "remote":
             params["location"] = target.location
+        elif target.location and target.location.lower() == "remote":
+            params["filters.workplaceTypes"] = "Remote"
 
         url = f"{_DICE_SEARCH_URL}?{urlencode(params)}"
 
@@ -323,17 +366,71 @@ class DiceCollector:
 
         response.raise_for_status()
 
+    def _parse_flight_chunks(self, body: str) -> list[DiscoveredSourceJob]:
+        """Extract job listings from Next.js RSC flight push chunks."""
+        job_list = _parse_flight_joblist(body)
+        if not job_list or not isinstance(job_list.get("data"), list):
+            return []
+
+        results: list[DiscoveredSourceJob] = []
+        for item in job_list["data"]:
+            if not isinstance(item, dict):
+                continue
+            guid = str(item.get("guid") or item.get("id") or "").strip()
+            if not guid:
+                continue
+            title = str(item.get("title") or "Dice Tech Job").strip()
+            detail_url = str(item.get("detailsPageUrl") or f"{_DICE_JOB_DETAIL_URL}/{guid}").strip()
+            results.append(
+                DiscoveredSourceJob(
+                    source=self.source.value,
+                    external_job_id=guid,
+                    title=title,
+                    url=detail_url,
+                )
+            )
+        return self._deduplicate(results)
+
+    def _parse_guid_fallback(self, body: str) -> list[DiscoveredSourceJob]:
+        """Extract job GUIDs directly using regex when structured data is missing."""
+        seen: set[str] = set()
+        results: list[DiscoveredSourceJob] = []
+        for guid in _GUID_RE.findall(body):
+            clean_guid = guid.strip()
+            if clean_guid and clean_guid not in seen:
+                seen.add(clean_guid)
+                results.append(
+                    DiscoveredSourceJob(
+                        source=self.source.value,
+                        external_job_id=clean_guid,
+                        title="Dice Tech Job",
+                        url=f"{_DICE_JOB_DETAIL_URL}/{clean_guid}",
+                    )
+                )
+        return results
+
     def _parse_search_response(
         self,
         body: str,
     ) -> list[DiscoveredSourceJob]:
         """Parse Dice search HTML/embedded JSON into discovered jobs."""
 
-        jobs = self._parse_json_scripts(body)
+        # 1. Next.js RSC Flight streaming parser
+        flight_jobs = self._parse_flight_chunks(body)
+        if flight_jobs:
+            return flight_jobs
 
+        # 2. JSON-LD and application/json scripts
+        jobs = self._parse_json_scripts(body)
         if jobs:
             return jobs
 
+        # 3. Fallback: regex GUID extraction
+        guid_jobs = self._parse_guid_fallback(body)
+        if guid_jobs:
+            return guid_jobs
+
+        # 4. Fallback: generic anchor links
         return self._parse_job_links(body)
 
     def _parse_job_detail(
@@ -375,14 +472,23 @@ class DiceCollector:
                     continue
 
                 if job.external_job_id != expected_external_job_id:
-                    logger.warning(
-                        "dice_detail_id_mismatch",
-                        extra={
-                            "expected_external_job_id": (expected_external_job_id),
-                            "actual_external_job_id": (job.external_job_id),
-                        },
+                    # Align with expected GUID from URL if JSON-LD identifier is internal
+                    job = RawSourceJob(
+                        source=job.source,
+                        external_job_id=expected_external_job_id,
+                        title=job.title,
+                        company=job.company,
+                        location=job.location,
+                        url=job.url or f"{_DICE_JOB_DETAIL_URL}/{expected_external_job_id}",
+                        description=job.description,
+                        salary_text=job.salary_text,
+                        employment_type=job.employment_type,
+                        remote=job.remote,
+                        posted_at=job.posted_at,
+                        source_updated_at=job.source_updated_at,
+                        skills=job.skills,
+                        raw_data=job.raw_data,
                     )
-                    continue
 
                 return job
 
@@ -485,6 +591,7 @@ class DiceCollector:
 
         external_id = self._first_text(
             value,
+            "guid",
             "id",
             "jobId",
             "jobID",

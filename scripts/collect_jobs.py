@@ -61,8 +61,10 @@ async def main() -> None:
             async with database.sessions() as session, session.begin():
                 outcome = await coordinator.run(session, collector, target)
             print(f"Discovered: {outcome.jobs_discovered}")
+            print(f"Recently Seen (Already in DB, refreshed): {outcome.details_skipped_recent}")
+            print(f"Details Fetched: {outcome.details_fetched}")
             print(f"Normalized: {outcome.jobs_normalized}")
-            print(f"Inserted: {outcome.jobs_inserted}")
+            print(f"Inserted (New): {outcome.jobs_inserted}")
             print(f"Updated: {outcome.jobs_updated}")
             print(f"Skipped (Deduplicated): {outcome.jobs_skipped}")
             print(f"Failed details: {outcome.jobs_failed}")
