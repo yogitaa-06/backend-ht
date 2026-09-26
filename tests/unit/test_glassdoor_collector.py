@@ -67,6 +67,9 @@ async def test_glassdoor_collector_parses_structured_job() -> None:
     assert job.salary_text == "$100000 - $150000"
     assert job.posted_at is not None
     assert job.raw_data["url"] == "https://www.glassdoor.com/job-listing/job?jl=987654321"
+    assert job.raw_data["salary_min"] == 100000
+    assert job.raw_data["salary_max"] == 150000
+    assert job.raw_data["salary_currency"] == "USD"
 
 
 @pytest.mark.anyio
@@ -180,6 +183,39 @@ def test_glassdoor_collector_is_registered() -> None:
     assert registry.is_registered(JobSource.GLASSDOOR)
     collector = registry.resolve(JobSource.GLASSDOOR)
     assert collector.source is JobSource.GLASSDOOR
+
+
+@pytest.mark.anyio
+async def test_glassdoor_html_title_challenge_raises_blocked_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="<html><head><title>Just a moment...</title></head><body>Verify you are human</body></html>",
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        collector = GlassdoorCollector(
+            client=client,
+            request_delay_seconds=0,
+        )
+
+        with pytest.raises(SourceBlockedError):
+            await collector.discover(_target())
+
+
+def test_glassdoor_collector_builds_curl_cffi_client() -> None:
+    collector = GlassdoorCollector()
+    client = collector._build_client()
+    try:
+        from curl_cffi.requests import AsyncSession
+        assert isinstance(client, AsyncSession)
+    finally:
+        import asyncio
+        if hasattr(client, "close"):
+            res = client.close()
+            if asyncio.iscoroutine(res):
+                asyncio.run(res)
 
 
 

@@ -41,7 +41,7 @@ async def main() -> None:
     
     sources_to_run: List[JobSource] = []
     if args.all:
-        sources_to_run = [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR]
+        sources_to_run = [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.HIRINGCAFE]
     elif args.source:
         sources_to_run = [JobSource(args.source)]
     else:

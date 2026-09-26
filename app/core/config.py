@@ -129,6 +129,8 @@ class Settings(BaseSettings):
     linkedin_collection_interval_minutes: int = Field(default=60, ge=1, le=1440)
     glassdoor_collection_interval_minutes: int = Field(default=120, ge=1, le=1440)
     hiringcafe_collection_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    glassdoor_collection_batch_size: int = Field(default=6, ge=1, le=50)
+    glassdoor_impersonate: str = Field(default="chrome124")
     job_collection_max_jobs_per_target: int = Field(default=100, ge=1, le=1000)
     job_collection_lock_ttl_seconds: int = Field(default=900, ge=60, le=7200)
     job_collection_task_timeout_seconds: int = Field(default=600, ge=30, le=3600)

@@ -40,6 +40,41 @@ def enabled_targets(settings: Settings) -> tuple[CollectionTarget, ...]:
     return tuple(unique.values())
 
 
+async def _rotate_queries(
+    redis: ArqRedis | Any,
+    source_name: str,
+    targets: list[CollectionTarget],
+    batch_size: int,
+    namespace: str = "hireandtech",
+) -> list[CollectionTarget]:
+    """Select a rotating slice of queries for source_name using Redis offset cursor."""
+    if not targets or batch_size >= len(targets):
+        return targets
+
+    offset_key = f"{namespace}:query_offset:{source_name}"
+    start_idx = 0
+    try:
+        if hasattr(redis, "get"):
+            raw_val = await redis.get(offset_key)
+            if raw_val is not None:
+                val_str = raw_val.decode() if isinstance(raw_val, bytes) else str(raw_val)
+                start_idx = int(val_str) % len(targets)
+        next_offset = (start_idx + batch_size) % len(targets)
+        await redis.set(offset_key, str(next_offset))
+    except Exception as exc:
+        logger.warning(
+            "query_rotation_redis_fallback",
+            extra={"source": source_name, "error": str(exc)},
+        )
+        start_idx = 0
+
+    selected: list[CollectionTarget] = []
+    for i in range(batch_size):
+        idx = (start_idx + i) % len(targets)
+        selected.append(targets[idx])
+    return selected
+
+
 async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
     """Atomically claim due sources and isolate failures per target."""
     settings: Settings = ctx["settings"]
@@ -134,8 +169,20 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
         claimed = await redis.set(due_key, now.isoformat(), nx=True, ex=interval_seconds)
         if not claimed:
             continue
+
+        if source == JobSource.GLASSDOOR and getattr(settings, "glassdoor_collection_batch_size", 0) > 0:
+            active_targets = await _rotate_queries(
+                redis,
+                source.value,
+                targets,
+                settings.glassdoor_collection_batch_size,
+                namespace=settings.job_collection_redis_namespace,
+            )
+        else:
+            active_targets = targets
+
         window = int(now.timestamp()) // interval_seconds
-        for target in targets:
+        for target in active_targets:
             try:
                 job = await redis.enqueue_job(
                     "run_job_collection",

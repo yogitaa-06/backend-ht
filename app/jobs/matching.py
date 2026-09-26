@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
+from uuid import UUID
 
 from app.jobs.normalization import roles_compatible
 
@@ -28,6 +29,9 @@ class MatchableJob(Protocol):
     allows the same deterministic logic to work during the migration from the
     legacy ``global_jobs`` read model to canonical jobs.
     """
+
+    @property
+    def id(self) -> UUID: ...
 
     @property
     def role_family(self) -> str: ...

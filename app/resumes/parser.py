@@ -91,7 +91,58 @@ class DeterministicPdfResumeParser:
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
             )
 
+        # Basic heuristic parsing for profile population
+        text_lower = extracted_text.lower()
+        lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
+        
+        full_name = lines[0] if lines else None
+        if full_name and len(full_name) > 200:
+            full_name = full_name[:200]
+            
+        skills = []
+        skill_keywords = {
+            "python": "Python", "react": "React", "devops": "DevOps", "sql": "SQL",
+            "aws": "AWS", "azure": "Azure", "gcp": "GCP", "docker": "Docker",
+            "kubernetes": "Kubernetes", "javascript": "JavaScript", "typescript": "TypeScript",
+            "java": "Java", "c++": "C++", "c#": "C#", "ruby": "Ruby", "go": "Go",
+            "rust": "Rust", "php": "PHP", "html": "HTML", "css": "CSS", "node": "Node.js",
+            "django": "Django", "flask": "Flask", "spring": "Spring", "linux": "Linux",
+            "sre": "SRE", "cloud": "Cloud Computing"
+        }
+        for kw, skill_name in skill_keywords.items():
+            if kw in text_lower:
+                skills.append(skill_name)
+                
+        location = "Remote"
+        if "new york" in text_lower or "ny" in text_lower.split(): location = "New York, NY"
+        elif "california" in text_lower or "ca" in text_lower.split(): location = "California"
+        elif "texas" in text_lower or "tx" in text_lower.split(): location = "Texas"
+        elif "london" in text_lower: location = "London, UK"
+        elif "san francisco" in text_lower: location = "San Francisco, CA"
+        elif "seattle" in text_lower: location = "Seattle, WA"
+        elif "austin" in text_lower: location = "Austin, TX"
+
+        current_title = "Software Engineer"
+        if "devops" in text_lower or "site reliability" in text_lower: current_title = "DevOps Engineer"
+        elif "frontend" in text_lower or "front end" in text_lower: current_title = "Frontend Engineer"
+        elif "backend" in text_lower or "back end" in text_lower: current_title = "Backend Engineer"
+        elif "fullstack" in text_lower or "full stack" in text_lower: current_title = "Full Stack Engineer"
+        elif "data scientist" in text_lower: current_title = "Data Scientist"
+        elif "product manager" in text_lower: current_title = "Product Manager"
+
+        from decimal import Decimal
+        yoe = Decimal("2.0")
+        if "senior" in text_lower or "staff" in text_lower or "principal" in text_lower:
+            yoe = Decimal("6.0")
+        elif "lead" in text_lower or "manager" in text_lower or "director" in text_lower:
+            yoe = Decimal("10.0")
+
         return ParsedResume(
+            full_name=full_name,
+            current_title=current_title,
+            location=location,
+            skills=skills[:10],  # Limit to top 10 matched skills
+            years_of_experience=yoe,
             extracted_text=extracted_text,
             raw_parser_output={
                 "page_count": page_count,

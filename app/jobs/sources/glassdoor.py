@@ -45,6 +45,9 @@ CHALLENGE_MARKERS = (
     "verify you are human", "unusual traffic from your computer network",
     "access to this page has been denied", "help us protect glassdoor",
     "security check to access",
+    "<title>just a moment",
+    "<title>security | glassdoor",
+    "<title>attention required",
 )
 
 
@@ -56,7 +59,7 @@ class GlassdoorCollector:
     def __init__(
         self,
         *,
-        client: httpx.AsyncClient | None = None,
+        client: httpx.AsyncClient | Any | None = None,
         request_delay_seconds: float = _REQUEST_DELAY_SECONDS,
         settings: Settings | None = None,
     ) -> None:
@@ -158,7 +161,12 @@ class GlassdoorCollector:
 
         finally:
             if owns_client:
-                await client.aclose()
+                if hasattr(client, "aclose"):
+                    await client.aclose()
+                elif hasattr(client, "close"):
+                    res = client.close()
+                    if asyncio.iscoroutine(res):
+                        await res
 
         logger.info(
             "glassdoor_collection_completed",
@@ -198,12 +206,33 @@ class GlassdoorCollector:
 
         return tuple(collected)
 
-    def _build_client(self) -> httpx.AsyncClient:
-        """Create the HTTP client used for Glassdoor requests."""
-        return build_collection_client(self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
+    def _build_client(self) -> Any:
+        """Create the HTTP client used for Glassdoor requests with Chrome TLS impersonation."""
+        proxy_url = (
+            self._settings.job_collection_proxy_url.get_secret_value()
+            if self._settings.job_collection_proxy_url
+            else None
+        )
+        try:
+            from curl_cffi.requests import AsyncSession
+
+            proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+            impersonate = getattr(self._settings, "glassdoor_impersonate", "chrome124")
+            return AsyncSession(
+                impersonate=impersonate,
+                proxies=proxies,
+                timeout=int(_DEFAULT_TIMEOUT_SECONDS),
+            )
+        except Exception as exc:
+            logger.warning(
+                "glassdoor_curl_cffi_fallback_to_httpx", extra={"error": str(exc)}
+            )
+            return build_collection_client(
+                self._settings, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS
+            )
 
     async def _resolve_location(
-        self, client: httpx.AsyncClient, location: str
+        self, client: Any, location: str
     ) -> tuple[int, str, str]:
         text = location.strip()
         # Fast path bypass: The reference project uses locId=0 and locT=C for all locations
@@ -212,14 +241,14 @@ class GlassdoorCollector:
 
     async def _fetch_search_page(
         self,
-        client: httpx.AsyncClient,
+        client: Any,
         *,
         target: CollectionTarget,
         page: int,
         loc_id: int,
         loc_type: str,
         loc_name: str,
-    ) -> httpx.Response:
+    ) -> Any:
         """Fetch one Glassdoor search-results page."""
         params: dict[str, str | int] = {
             "sc.keyword": target.query,
@@ -246,6 +275,11 @@ class GlassdoorCollector:
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = exc
                 continue
+            except Exception as exc:
+                if "curl" in type(exc).__module__.lower() or "RequestsError" in type(exc).__name__:
+                    last_exc = exc
+                    continue
+                raise
 
             try:
                 self._raise_for_status(response, request_description="collection request")
@@ -256,7 +290,7 @@ class GlassdoorCollector:
 
         # Exhausted attempts
         if last_exc:
-            if isinstance(last_exc, (httpx.TimeoutException, httpx.NetworkError)):
+            if isinstance(last_exc, (httpx.TimeoutException, httpx.NetworkError)) or "curl" in type(last_exc).__module__.lower():
                 raise TemporaryCollectionError(
                     f"Glassdoor request failed for query {target.query!r} after {attempts} attempts"
                 ) from last_exc
@@ -266,13 +300,13 @@ class GlassdoorCollector:
 
     def _raise_for_status(
         self,
-        response: httpx.Response,
+        response: Any,
         *,
         request_description: str,
     ) -> None:
         """Translate HTTP failures into collection errors."""
-        status = response.status_code
-        text = response.text or ""
+        status = getattr(response, "status_code", 0)
+        text = getattr(response, "text", "") or ""
 
         blocked = False
         if status in {403, 407, 429, 999}:
@@ -288,6 +322,7 @@ class GlassdoorCollector:
                 and status == 200
                 and len(text.strip()) < 512
                 and ("<html" in scan_head or "<!doctype" in scan_head)
+                and "jobview" not in text
             ):
                 blocked = True
 
@@ -423,7 +458,14 @@ class GlassdoorCollector:
                 remote=remote,
                 posted_at=posted_at,
                 source_updated_at=None,
-                raw_data={"title": title, "company": comp, "url": clean_link},
+                raw_data={
+                    "title": title,
+                    "company": comp,
+                    "url": clean_link,
+                    "salary_min": smin,
+                    "salary_max": smax,
+                    "salary_currency": "USD",
+                },
             ))
 
         if not discovered:

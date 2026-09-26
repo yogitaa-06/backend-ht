@@ -60,7 +60,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 "tests/**/*.py" = ["S101"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 strict = true
 plugins = ["pydantic.mypy"]
 exclude = ['\.venv']

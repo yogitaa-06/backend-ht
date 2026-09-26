@@ -320,8 +320,9 @@ class CanonicalJobRepository:
             source.content_hash = job.content_hash
 
         canonical.company_id = company.id if company else canonical.company_id
-        canonical.title = job.job_title
-        canonical.normalized_title = job.normalized_title
+        if job.job_title and not job.job_title.startswith("Unknown "):
+            canonical.title = job.job_title
+            canonical.normalized_title = job.normalized_title
         canonical.description = _prefer_text(job.description, canonical.description)
         if _has_text(job.location):
             canonical.location = job.location
