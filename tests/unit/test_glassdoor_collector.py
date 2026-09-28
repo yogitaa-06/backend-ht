@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import httpx
 import pytest
 
@@ -65,6 +67,11 @@ async def test_glassdoor_collector_parses_structured_job() -> None:
     assert job.url == "https://www.glassdoor.com/job-listing/job?jl=987654321"
     assert job.description == "Requires machine learning expertise."
     assert job.salary_text == "$100000 - $150000"
+    assert job.salary_min == Decimal("100000")
+    assert job.salary_max == Decimal("150000")
+    assert job.salary_currency == "USD"
+    assert job.salary_period == "year"
+    assert "Machine Learning" in job.skills
     assert job.posted_at is not None
     assert job.raw_data["url"] == "https://www.glassdoor.com/job-listing/job?jl=987654321"
     assert job.raw_data["salary_min"] == 100000

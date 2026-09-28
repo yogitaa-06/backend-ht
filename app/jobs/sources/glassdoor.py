@@ -12,6 +12,7 @@ import logging
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -25,6 +26,13 @@ from app.jobs.errors import (
     TemporaryCollectionError,
 )
 from app.jobs.normalization import DiscoveredSourceJob, RawSourceJob
+from app.jobs.parsing import (
+    extract_experience,
+    extract_skills_from_text,
+    normalize_employment_type,
+    normalize_remote_type,
+    parse_salary,
+)
 from app.jobs.targets import CollectionTarget
 from app.jobs.transport import build_collection_client
 
@@ -264,7 +272,8 @@ class GlassdoorCollector:
             "p": page,
         }
 
-        if target.location and target.location.lower() != "remote":
+        is_us = bool(target.location and target.location.lower() in ("united states", "usa", "us"))
+        if target.location and target.location.lower() != "remote" and not is_us:
             params["locT"] = loc_type
             params["locId"] = loc_id
             params["locKeyword"] = loc_name
@@ -443,8 +452,26 @@ class GlassdoorCollector:
                 remote = False
 
             salary_text = None
+            sal_min: Decimal | None = Decimal(str(smin)) if smin else None
+            sal_max: Decimal | None = Decimal(str(smax)) if smax else None
+            sal_curr: str | None = "USD" if (sal_min or sal_max) else None
+            sal_period: str | None = None
+
             if smin and smax:
                 salary_text = f"${smin} - ${smax}"
+                sal_period = "year" if smin >= 20000 else ("hour" if smin <= 300 else None)
+            else:
+                p_min, p_max, p_curr, p_period, p_text = parse_salary(desc)
+                if p_min is not None or p_max is not None:
+                    sal_min, sal_max = p_min, p_max
+                    sal_curr = p_curr
+                    sal_period = p_period
+                    salary_text = p_text
+
+            exp_min, exp_max, exp_text = extract_experience(f"{title}\n{desc}")
+            skills = tuple(extract_skills_from_text(desc))
+            emp_type = normalize_employment_type(desc)
+            remote_type = normalize_remote_type(f"{loc}\n{desc}", remote_flag=remote)
 
             discovered.append(
                 DiscoveredSourceJob(
@@ -465,10 +492,18 @@ class GlassdoorCollector:
                     url=clean_link,
                     description=desc,
                     salary_text=salary_text,
-                    employment_type=None,
+                    salary_min=sal_min,
+                    salary_max=sal_max,
+                    salary_currency=sal_curr,
+                    salary_period=sal_period,
+                    employment_type=emp_type,
                     remote=remote,
+                    remote_type=remote_type,
                     posted_at=posted_at,
-                    source_updated_at=None,
+                    skills=skills,
+                    experience_min_years=exp_min,
+                    experience_max_years=exp_max,
+                    experience_text=exp_text,
                     raw_data={
                         "title": title,
                         "company": comp,
