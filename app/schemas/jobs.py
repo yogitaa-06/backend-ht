@@ -28,6 +28,11 @@ class JobResponse(BaseModel):
     experience_min_years: int | None
     experience_max_years: int | None
     experience_text: str | None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
+    remote_type: str | None = None
     match_score: float | None = None
     role_score: float | None = None
     skills_score: float | None = None

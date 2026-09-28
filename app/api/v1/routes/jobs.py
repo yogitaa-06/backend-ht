@@ -59,6 +59,11 @@ def _response(
         "experience_min_years": job.experience_min_years,
         "experience_max_years": job.experience_max_years,
         "experience_text": job.experience_text,
+        "salary_min": float(job.salary_min) if job.salary_min is not None else None,
+        "salary_max": float(job.salary_max) if job.salary_max is not None else None,
+        "salary_currency": job.salary_currency,
+        "salary_period": job.salary_period,
+        "remote_type": job.remote_type,
     }
 
     return JobResponse(

@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, exists, func, or_, select, update
@@ -48,6 +49,11 @@ class CanonicalJobRead:
     experience_text: str | None
     last_seen_at: datetime
     is_active: bool
+    salary_min: Decimal | None = None
+    salary_max: Decimal | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
+    remote_type: str | None = None
 
 
 class CanonicalJobRepository:
@@ -235,13 +241,17 @@ class CanonicalJobRepository:
             location=job.location,
             normalized_location=job.normalized_location,
             employment_type=job.employment_type,
-            remote_type=_remote_type(job.remote),
+            remote_type=job.remote_type or _remote_type(job.remote),
             skills=job.skills,
             experience_min_years=job.experience_min_years,
             experience_max_years=job.experience_max_years,
             experience_text=job.experience_text,
             role_family=job.role_family,
             salary_text=job.salary_text,
+            salary_min=job.salary_min,
+            salary_max=job.salary_max,
+            salary_currency=job.salary_currency,
+            salary_period=job.salary_period,
             posted_at=job.posted_at,
             source_updated_at=job.source_updated_at,
             first_seen_at=observed_at,
@@ -328,7 +338,7 @@ class CanonicalJobRepository:
             canonical.location = job.location
             canonical.normalized_location = job.normalized_location
         canonical.employment_type = _prefer_text(job.employment_type, canonical.employment_type)
-        canonical.remote_type = _remote_type(job.remote) or canonical.remote_type
+        canonical.remote_type = job.remote_type or _remote_type(job.remote) or canonical.remote_type
         canonical.skills = job.skills or canonical.skills
         canonical.experience_min_years = (
             job.experience_min_years
@@ -343,6 +353,14 @@ class CanonicalJobRepository:
         canonical.experience_text = _prefer_text(job.experience_text, canonical.experience_text)
         canonical.role_family = job.role_family
         canonical.salary_text = _prefer_text(job.salary_text, canonical.salary_text)
+        if job.salary_min is not None:
+            canonical.salary_min = job.salary_min
+        if job.salary_max is not None:
+            canonical.salary_max = job.salary_max
+        if job.salary_currency:
+            canonical.salary_currency = job.salary_currency
+        if job.salary_period:
+            canonical.salary_period = job.salary_period
 
         canonical.posted_at = job.posted_at or canonical.posted_at
 
@@ -475,6 +493,11 @@ class CanonicalJobRepository:
                     experience_text=(canonical.experience_text),
                     last_seen_at=observation.last_seen_at,
                     is_active=canonical.is_active,
+                    salary_min=canonical.salary_min,
+                    salary_max=canonical.salary_max,
+                    salary_currency=canonical.salary_currency,
+                    salary_period=canonical.salary_period,
+                    remote_type=canonical.remote_type,
                 )
             )
 

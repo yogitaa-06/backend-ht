@@ -90,7 +90,7 @@ async def test_refresh_enriches_partial_job_and_preserves_values_from_null_updat
     assert canonical.description == "Protect production systems."
     assert canonical.employment_type == "FULL_TIME"
     assert canonical.remote_type == "on_site"
-    assert canonical.skills == ["aws", "python"]
+    assert canonical.skills == ["AWS", "Python"]
     assert canonical.posted_at == datetime(2026, 9, 11, 14, 32, 19, tzinfo=UTC)
     assert source.source_posted_at == canonical.posted_at
 
@@ -115,7 +115,7 @@ async def test_refresh_enriches_partial_job_and_preserves_values_from_null_updat
     assert canonical.description == "Protect production systems."
     assert canonical.employment_type == "FULL_TIME"
     assert canonical.remote_type == "on_site"
-    assert canonical.skills == ["aws", "python"]
+    assert canonical.skills == ["AWS", "Python"]
     assert canonical.posted_at == datetime(2026, 9, 11, 14, 32, 19, tzinfo=UTC)
     assert source.source_url == "https://www.dice.com/job-detail/job-1"
     assert source.raw_data == {"@type": "JobPosting"}

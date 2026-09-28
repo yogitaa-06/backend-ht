@@ -62,7 +62,7 @@ def test_normalization_hash_is_stable() -> None:
     raw = RawSourceJob("dice", "123", " DevOps Engineer ", skills=("AWS", "aws"))
     normalized = normalize_job(raw)
     assert normalized.role_family == "devops"
-    assert normalized.skills == ["aws"]
+    assert normalized.skills == ["AWS"]
     assert normalized.content_hash == normalize_job(raw).content_hash
 
 
@@ -106,5 +106,5 @@ def test_normalization_preserves_available_detail_fields_without_synthesizing_po
     assert normalized.employment_type == "FULL_TIME"
     assert normalized.remote is False
     assert normalized.posted_at == posted_at
-    assert normalized.skills == ["aws", "python"]
+    assert normalized.skills == ["AWS", "Python"]
     assert normalize_job(RawSourceJob("dice", "detail-2", "Engineer")).posted_at is None

@@ -7,9 +7,19 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from unicodedata import normalize as unicode_normalize
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from app.jobs.parsing import (
+    extract_experience,
+    extract_skills_from_text,
+    merge_skills,
+    normalize_employment_type,
+    normalize_remote_type,
+    parse_salary,
+)
 
 ROLE_FAMILIES = {
     "backend",
@@ -59,6 +69,7 @@ class DiscoveredSourceJob:
     url: str | None = None
 
 
+
 @dataclass(frozen=True)
 class RawSourceJob:
     """Source-neutral job payload emitted by every collector adapter."""
@@ -71,11 +82,19 @@ class RawSourceJob:
     url: str | None = None
     description: str | None = None
     salary_text: str | None = None
+    salary_min: Decimal | None = None
+    salary_max: Decimal | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
     employment_type: str | None = None
     remote: bool | None = None
+    remote_type: str | None = None
     posted_at: datetime | None = None
     source_updated_at: datetime | None = None
     skills: tuple[str, ...] = ()
+    experience_min_years: int | None = None
+    experience_max_years: int | None = None
+    experience_text: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -103,6 +122,11 @@ class NormalizedJob:
     experience_text: str | None
     content_hash: str
     raw_data: dict[str, Any]
+    salary_min: Decimal | None = None
+    salary_max: Decimal | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
+    remote_type: str | None = None
 
 
 def normalize_title(title: str) -> str:
@@ -184,26 +208,6 @@ def roles_compatible(candidate_role: str, job_role: str) -> bool:
     )
 
 
-_EXPERIENCE_PATTERNS = (
-    re.compile(r"\b(?P<min>\d{1,2})\s*(?:-|\N{EN DASH}|to)\s*(?P<max>\d{1,2})\s+years?\b", re.I),
-    re.compile(r"\b(?:minimum|at least)\s+(?P<min>\d{1,2})\s+years?\b", re.I),
-    re.compile(r"\b(?P<min>\d{1,2})\s*\+\s*years?\b", re.I),
-    re.compile(r"\b(?P<min>\d{1,2})\s+years?\s+(?:of\s+)?(?:professional\s+)?experience\b", re.I),
-)
-
-
-def extract_experience(text: str | None) -> tuple[int | None, int | None, str | None]:
-    if not text:
-        return None, None, None
-    for pattern in _EXPERIENCE_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            minimum = int(match.group("min"))
-            maximum = match.groupdict().get("max")
-            return minimum, int(maximum) if maximum else None, match.group(0)
-    return None, None, None
-
-
 def normalize_job(raw: RawSourceJob) -> NormalizedJob:
     source = raw.source.strip().casefold()
     external_job_id = raw.external_job_id.strip()
@@ -212,8 +216,50 @@ def normalize_job(raw: RawSourceJob) -> NormalizedJob:
         raise ValueError("source, external job ID, and title must not be blank")
 
     title = normalize_title(job_title)
-    minimum, maximum, experience_text = extract_experience(f"{raw.title}\n{raw.description or ''}")
-    skills = sorted({skill.strip().casefold() for skill in raw.skills if skill.strip()})
+
+    # 1. Experience
+    minimum = raw.experience_min_years
+    maximum = raw.experience_max_years
+    experience_text = raw.experience_text
+    if minimum is None and maximum is None and not experience_text:
+        minimum, maximum, experience_text = extract_experience(
+            f"{raw.title}\n{raw.description or ''}"
+        )
+
+    # 2. Salary
+    salary_min = raw.salary_min
+    salary_max = raw.salary_max
+    salary_curr = raw.salary_currency
+    salary_period = raw.salary_period
+    salary_text = raw.salary_text
+    if salary_min is None and salary_max is None:
+        p_min, p_max, p_curr, p_period, p_text = parse_salary(
+            f"{raw.salary_text or ''}\n{raw.description or ''}"
+        )
+        if p_min is not None or p_max is not None:
+            salary_min, salary_max = p_min, p_max
+            salary_curr = p_curr
+            salary_period = p_period
+            if not salary_text:
+                salary_text = p_text
+
+    # 3. Skills
+    skills = sorted(
+        merge_skills(raw.skills, extract_skills_from_text(raw.description)),
+        key=str.casefold,
+    )
+
+    # 4. Employment type & Remote
+    employment_type = raw.employment_type
+    if not employment_type:
+        employment_type = normalize_employment_type(f"{raw.title}\n{raw.description or ''}")
+    remote_type = raw.remote_type or normalize_remote_type(
+        f"{raw.location or ''}\n{raw.description or ''}", remote_flag=raw.remote
+    )
+    remote = raw.remote
+    if remote is None and remote_type == "remote":
+        remote = True
+
     url = normalize_url(raw.url)
     company = " ".join(raw.company.split()) if raw.company else None
     location = " ".join(raw.location.split()) if raw.location else None
@@ -222,13 +268,13 @@ def normalize_job(raw: RawSourceJob) -> NormalizedJob:
     content = {
         "company": company,
         "description": raw.description,
-        "employment_type": raw.employment_type,
+        "employment_type": employment_type,
         "job_url": url,
         "location": location,
         "posted_at": posted_at.isoformat() if posted_at else None,
-        "remote": raw.remote,
-        "salary_text": raw.salary_text,
-        "skills": skills,
+        "remote": remote,
+        "salary_text": salary_text,
+        "skills": sorted(s.casefold() for s in skills),
         "source_updated_at": source_updated_at.isoformat() if source_updated_at else None,
         "title": job_title,
     }
@@ -247,9 +293,9 @@ def normalize_job(raw: RawSourceJob) -> NormalizedJob:
         normalize_location(location) if location else None,
         url,
         raw.description,
-        raw.salary_text,
-        raw.employment_type,
-        raw.remote,
+        salary_text,
+        employment_type,
+        remote,
         skills,
         posted_at,
         source_updated_at,
@@ -258,6 +304,11 @@ def normalize_job(raw: RawSourceJob) -> NormalizedJob:
         experience_text,
         digest,
         raw.raw_data,
+        salary_min,
+        salary_max,
+        salary_curr,
+        salary_period,
+        remote_type,
     )
 
 

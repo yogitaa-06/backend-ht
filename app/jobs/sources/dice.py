@@ -14,6 +14,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode, urljoin
 
@@ -27,6 +28,14 @@ from app.jobs.errors import (
     TemporaryCollectionError,
 )
 from app.jobs.normalization import DiscoveredSourceJob, RawSourceJob
+from app.jobs.parsing import (
+    extract_experience,
+    extract_skills_from_text,
+    merge_skills,
+    normalize_employment_type,
+    normalize_remote_type,
+    parse_salary,
+)
 from app.jobs.targets import CollectionTarget
 from app.jobs.transport import build_collection_client
 
@@ -482,11 +491,19 @@ class DiceCollector:
                         url=job.url or f"{_DICE_JOB_DETAIL_URL}/{expected_external_job_id}",
                         description=job.description,
                         salary_text=job.salary_text,
+                        salary_min=job.salary_min,
+                        salary_max=job.salary_max,
+                        salary_currency=job.salary_currency,
+                        salary_period=job.salary_period,
                         employment_type=job.employment_type,
                         remote=job.remote,
+                        remote_type=job.remote_type,
                         posted_at=job.posted_at,
                         source_updated_at=job.source_updated_at,
                         skills=job.skills,
+                        experience_min_years=job.experience_min_years,
+                        experience_max_years=job.experience_max_years,
+                        experience_text=job.experience_text,
                         raw_data=job.raw_data,
                     )
 
@@ -623,9 +640,13 @@ class DiceCollector:
             "jobDescription",
         )
 
-        salary = self._extract_salary(value)
+        salary_min, salary_max, salary_curr, salary_period, salary_text = (
+            self._extract_salary_details(value, description)
+        )
 
         employment_type = self._extract_employment_type(value)
+        if not employment_type and description:
+            employment_type = normalize_employment_type(description)
 
         posted_at = self._parse_datetime(
             self._first_text(
@@ -641,12 +662,19 @@ class DiceCollector:
             self._first_text(value, "dateModified", "modifiedDate", "updated_at")
         )
 
-        skills = self._extract_skills(value)
+        skills = self._extract_skills_details(value, description)
 
         remote = self._extract_remote(
             value,
             location,
         )
+        remote_type = normalize_remote_type(
+            f"{location or ''}\n{description or ''}", remote_flag=remote
+        )
+        if remote is None and remote_type == "remote":
+            remote = True
+
+        exp_min, exp_max, exp_text = self._extract_experience_details(value, description)
 
         return RawSourceJob(
             source=self.source.value,
@@ -656,12 +684,20 @@ class DiceCollector:
             location=location,
             url=self._absolute_url(url),
             description=description,
-            salary_text=salary,
+            salary_text=salary_text,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            salary_currency=salary_curr,
+            salary_period=salary_period,
             employment_type=employment_type,
             remote=remote,
+            remote_type=remote_type,
             posted_at=posted_at,
             source_updated_at=source_updated_at,
             skills=skills,
+            experience_min_years=exp_min,
+            experience_max_years=exp_max,
+            experience_text=exp_text,
             raw_data=dict(value),
         )
 
@@ -894,6 +930,86 @@ class DiceCollector:
             parts.append(f"per {unit_text.strip().lower()}")
 
         return " ".join(parts)
+
+    def _extract_salary_details(
+        self,
+        value: Mapping[str, Any],
+        description: str | None = None,
+    ) -> tuple[Decimal | None, Decimal | None, str | None, str | None, str | None]:
+        """Extract structured salary details (min, max, currency, period, text)."""
+        base_salary = value.get("baseSalary")
+        if isinstance(base_salary, Mapping):
+            currency = base_salary.get("currency")
+            salary_value = base_salary.get("value")
+            source: Mapping[str, Any] = (
+                salary_value if isinstance(salary_value, Mapping) else base_salary
+            )
+
+            min_val = source.get("minValue")
+            max_val = source.get("maxValue")
+            exact_val = source.get("value")
+            unit_text = source.get("unitText")
+
+            s_min = Decimal(str(min_val)) if isinstance(min_val, (int, float)) else None
+            s_max = Decimal(str(max_val)) if isinstance(max_val, (int, float)) else None
+            if s_min is None and isinstance(exact_val, (int, float)):
+                s_min = Decimal(str(exact_val))
+            if s_max is None and isinstance(exact_val, (int, float)):
+                s_max = Decimal(str(exact_val))
+
+            curr = str(currency).strip().upper() if currency else "USD"
+            period = unit_text.strip().lower() if isinstance(unit_text, str) else None
+            if period in ("year", "annual", "annually", "yr"):
+                period = "year"
+            elif period in ("hour", "hourly", "hr"):
+                period = "hour"
+            elif period in ("month", "monthly", "mo"):
+                period = "month"
+
+            s_text = self._extract_salary(value)
+            if s_min is not None or s_max is not None:
+                return s_min, s_max, curr, period, s_text
+
+        # Fallback to direct salary text
+        direct = self._first_text(value, "salary", "salaryText")
+        if direct:
+            p_min, p_max, p_curr, p_period, _p_text = parse_salary(direct)
+            if p_min is not None or p_max is not None:
+                return p_min, p_max, p_curr, p_period, direct
+            return None, None, None, None, direct
+
+        # Try parsing from description
+        if description:
+            return parse_salary(description)
+
+        return None, None, None, None, None
+
+    def _extract_experience_details(
+        self,
+        value: Mapping[str, Any],
+        description: str | None = None,
+    ) -> tuple[int | None, int | None, str | None]:
+        """Extract experience requirements from structured fields or description."""
+        exp_req = value.get("experienceRequirements")
+        exp_str = ""
+        if isinstance(exp_req, str):
+            exp_str = exp_req
+        elif isinstance(exp_req, Mapping):
+            exp_str = str(exp_req.get("monthsOfExperience") or exp_req.get("name") or "")
+
+        combined = f"{exp_str}\n{description or ''}"
+        return extract_experience(combined)
+
+    def _extract_skills_details(
+        self,
+        value: Mapping[str, Any],
+        description: str | None = None,
+    ) -> tuple[str, ...]:
+        """Extract skills merging structured fields with description scanning."""
+        explicit = self._extract_skills(value)
+        desc_skills = extract_skills_from_text(description)
+        merged = merge_skills(explicit, desc_skills)
+        return tuple(merged)
 
     @staticmethod
     def _format_number(

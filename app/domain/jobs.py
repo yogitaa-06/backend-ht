@@ -264,6 +264,7 @@ class CanonicalJob(IdentityTimestampMixin, Base):
     salary_max: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     salary_currency: Mapped[str | None] = mapped_column(String(3))
     salary_text: Mapped[str | None] = mapped_column(String(500))
+    salary_period: Mapped[str | None] = mapped_column(String(32))
 
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
