@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     job_collection_task_timeout_seconds: int = Field(default=600, ge=30, le=3600)
     job_collection_max_tries: int = Field(default=3, ge=1, le=10)
     job_collection_queue_name: str = Field(default="hireandtech:jobs", min_length=1, max_length=100)
+    job_search_queue_name: str = Field(default="hireandtech:search", min_length=1, max_length=100)
     job_collection_redis_namespace: str = Field(
         default="hireandtech", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9:_-]+$"
     )
