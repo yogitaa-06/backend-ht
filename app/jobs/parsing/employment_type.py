@@ -19,9 +19,9 @@ def normalize_employment_type(text: str | None) -> str | None:
         return "internship"
     if re.search(r"\b(contract(?:or)?|c2c|corp-to-corp|w2 contract|freelance)\b", lowered):
         return "contract"
-    if re.search(r"\b(part[ -]?time)\b", lowered):
+    if re.search(r"\b(part[ _-]?time)\b", lowered):
         return "part-time"
-    if re.search(r"\b(full[ -]?time|permanent|direct hire)\b", lowered):
+    if re.search(r"\b(full[ _-]?time|permanent|direct hire)\b", lowered):
         return "full-time"
     if re.search(r"\b(temp(?:orary)?)\b", lowered):
         return "temporary"

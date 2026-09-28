@@ -22,6 +22,13 @@ from app.jobs.errors import (
     TemporaryCollectionError,
 )
 from app.jobs.normalization import DiscoveredSourceJob, RawSourceJob
+from app.jobs.parsing.employment_type import (
+    normalize_employment_type,
+    normalize_remote_type,
+)
+from app.jobs.parsing.experience import extract_experience
+from app.jobs.parsing.salary import parse_salary
+from app.jobs.parsing.skills import extract_skills_from_text
 from app.jobs.targets import CollectionTarget
 from app.jobs.transport import build_collection_client
 
@@ -448,11 +455,19 @@ class LinkedInCollector:
                 val = " ".join(re.sub(r"<[^>]+>", " ", v_match.group(1)).split())
                 criteria[hdr] = val
 
-        employment_type = criteria.get("employment type", "")
+        raw_emp = criteria.get("employment type", "")
+        emp_type = raw_emp.strip() or normalize_employment_type(description)
 
-        remote = None
-        if "remote" in location.lower() or "remote" in title.lower():
-            remote = True
+        sal_min, sal_max, sal_curr, sal_period, sal_text = parse_salary(description)
+        exp_min, exp_max, exp_text = extract_experience(f"{title}\n{description}")
+        skills = tuple(extract_skills_from_text(f"{title}\n{description}"))
+
+        remote_type = normalize_remote_type(f"{location}\n{title}\n{description}")
+        remote = (
+            True
+            if remote_type == "remote"
+            else (False if remote_type in ("hybrid", "onsite") else None)
+        )
 
         return RawSourceJob(
             source=self.source.value,
@@ -462,12 +477,20 @@ class LinkedInCollector:
             location=location,
             url=job_url,
             description=description,
-            salary_text=None,
-            employment_type=employment_type,
+            salary_text=sal_text,
+            salary_min=sal_min,
+            salary_max=sal_max,
+            salary_currency=sal_curr,
+            salary_period=sal_period,
+            employment_type=emp_type,
             remote=remote,
+            remote_type=remote_type,
             posted_at=None,
             source_updated_at=None,
-            skills=(),
+            skills=skills,
+            experience_min_years=exp_min,
+            experience_max_years=exp_max,
+            experience_text=exp_text,
             raw_data={"criteria": criteria},
         )
 
