@@ -49,7 +49,7 @@ class SearchService:
             "job_search_committed",
             extra={"search_id": str(search.id), "user_id": str(user_id)},
         )
-        
+
         try:
             # Enqueue to ARQ
             await self.redis.enqueue_job(
@@ -74,7 +74,7 @@ class SearchService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to enqueue search task.",
             ) from exc
-        
+
         return search
 
     async def get_search_progress(
@@ -88,5 +88,3 @@ class SearchService:
                 detail="Search not found",
             )
         return search
-
-

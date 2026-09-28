@@ -23,12 +23,10 @@ class SearchRepository:
         self, session: AsyncSession, search_id: UUID, user_id: UUID
     ) -> JobSearch | None:
         """Get a search by ID and verify ownership."""
-        stmt = select(JobSearch).where(
-            JobSearch.id == search_id, JobSearch.user_id == user_id
-        )
+        stmt = select(JobSearch).where(JobSearch.id == search_id, JobSearch.user_id == user_id)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
-        
+
     async def get_search_for_worker(
         self, session: AsyncSession, search_id: UUID
     ) -> JobSearch | None:
@@ -37,9 +35,7 @@ class SearchRepository:
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def save_results(
-        self, session: AsyncSession, results: list[JobSearchResult]
-    ) -> None:
+    async def save_results(self, session: AsyncSession, results: list[JobSearchResult]) -> None:
         """Save a batch of search results."""
         if results:
             session.add_all(results)
@@ -49,13 +45,13 @@ class SearchRepository:
         self, session: AsyncSession, search_id: UUID, page: int = 1, page_size: int = 50
     ) -> tuple[Sequence[JobSearchResult], int]:
         """Get paginated search results with the canonical job loaded."""
-        
+
         # Count total
         count_stmt = select(func.count(JobSearchResult.id)).where(
             JobSearchResult.search_id == search_id
         )
         total = await session.scalar(count_stmt) or 0
-        
+
         if total == 0:
             return [], 0
 

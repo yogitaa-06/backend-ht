@@ -71,6 +71,7 @@
 3. Run the normalization step in a Python REPL:
    ```python
    from app.jobs.normalization import normalize_job
+
    norm = normalize_job(raw_job)
    print(norm)
    ```

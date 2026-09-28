@@ -37,7 +37,7 @@ class JobSearch(IdentityTimestampMixin, Base):
         ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
-    
+
     query: Mapped[str | None] = mapped_column(String(200))
     location: Mapped[str | None] = mapped_column(String(200))
     remote_type: Mapped[str | None] = mapped_column(String(32))
@@ -45,11 +45,11 @@ class JobSearch(IdentityTimestampMixin, Base):
     experience_min: Mapped[int | None] = mapped_column(Integer)
     experience_max: Mapped[int | None] = mapped_column(Integer)
     requested_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    
+
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     error_message: Mapped[str | None] = mapped_column(String(1024))
-    
+
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -72,10 +72,8 @@ class JobSearchResult(IdentityTimestampMixin, Base):
     search_id: Mapped[UUID] = mapped_column(
         ForeignKey("job_searches.id", ondelete="CASCADE"), nullable=False
     )
-    job_id: Mapped[UUID] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
-    )
-    
+    job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     match_score: Mapped[float] = mapped_column(Float, nullable=False)
     skills_score: Mapped[float] = mapped_column(Float, nullable=False)

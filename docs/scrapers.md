@@ -20,8 +20,11 @@ All collectors conform to the **`JobSourceCollector`** protocol defined in `app/
 ```python
 class JobSourceCollector(Protocol):
     source: JobSource  # Enum identifying the source
+
     def discover(self, target: CollectionTarget) -> Sequence[DiscoveredSourceJob]: ...
-    def fetch_details(self, target: CollectionTarget, candidates: Sequence[DiscoveredSourceJob]) -> Sequence[RawSourceJob]: ...
+    def fetch_details(
+        self, target: CollectionTarget, candidates: Sequence[DiscoveredSourceJob]
+    ) -> Sequence[RawSourceJob]: ...
 ```
 * `discover` returns lightweight candidates (IDs, titles, URLs) limited by `target.max_jobs`.
 * `fetch_details` receives a filtered list of candidates and returns fully populated `RawSourceJob` objects.
@@ -88,6 +91,7 @@ Both methods raise the custom exceptions in `app/jobs/errors.py` to signal tempo
    from app.jobs.targets import CollectionTarget
    from app.domain.jobs import JobSource
 
+
    class MySourceCollector:
        source = JobSource.MY_SOURCE
 
@@ -95,7 +99,9 @@ Both methods raise the custom exceptions in `app/jobs/errors.py` to signal tempo
            # return lightweight candidates respecting target.max_jobs
            ...
 
-       async def fetch_details(self, target: CollectionTarget, candidates: Sequence[DiscoveredSourceJob]) -> Sequence[RawSourceJob]:
+       async def fetch_details(
+           self, target: CollectionTarget, candidates: Sequence[DiscoveredSourceJob]
+       ) -> Sequence[RawSourceJob]:
            # return fully populated RawSourceJob objects
            ...
    ```

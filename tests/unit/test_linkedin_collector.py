@@ -56,7 +56,14 @@ async def test_linkedin_collector_parses_structured_job() -> None:
 
         jobs = await collector.fetch_details(
             _target(),
-            [DiscoveredSourceJob(JobSource.LINKEDIN.value, "123456789", "Python Developer", "https://www.linkedin.com/jobs/view/123456789")]
+            [
+                DiscoveredSourceJob(
+                    JobSource.LINKEDIN.value,
+                    "123456789",
+                    "Python Developer",
+                    "https://www.linkedin.com/jobs/view/123456789",
+                )
+            ],
         )
 
     assert len(jobs) == 1
@@ -82,25 +89,25 @@ async def test_linkedin_collector_deduplicates_results(caplog: pytest.LogCapture
         "<html>\n"
         "  <body>\n"
         '    <ul class="jobs-search__results-list">\n'
-        '      <!-- Case 0: data-entity-urn present -->\n'
+        "      <!-- Case 0: data-entity-urn present -->\n"
         '      <li data-entity-urn="urn:li:jobPosting:9999999999"><a class="base-card__full-link" '
         'href="/jobs/view/something-9999999999">Job 0</a></li>\n'
-        '      <!-- Case 1: Plain ID -->\n'
+        "      <!-- Case 1: Plain ID -->\n"
         '      <li><a class="base-card__full-link" href="/jobs/view/4419969671">Job 1</a></li>\n'
-        '      <!-- Case 2: Slug with ID -->\n'
+        "      <!-- Case 2: Slug with ID -->\n"
         '      <li><a class="base-card__full-link" '
         'href="/jobs/view/senior-software-engineer-at-company-4419969671">Job 2</a></li>\n'
-        '      <!-- Case 3: Absolute URL with query params -->\n'
+        "      <!-- Case 3: Absolute URL with query params -->\n"
         '      <li><a class="base-card__full-link" '
         'href="https://www.linkedin.com/jobs/view/software-engineer-at-company-4419969671"\n'
         ' "?position=2&pageNum=0">Job 3</a></li>\n'
-        '      <!-- Case 4: Query parameter shouldn\'t become ID -->\n'
+        "      <!-- Case 4: Query parameter shouldn't become ID -->\n"
         '      <li><a class="base-card__full-link" '
         'href="/jobs/view/some-job-4419969672?position=2">Job 4</a></li>\n'
-        '      <!-- Case 5: Malformed URL without valid trailing ID -->\n'
+        "      <!-- Case 5: Malformed URL without valid trailing ID -->\n"
         '      <li><a class="base-card__full-link" '
         'href="/jobs/view/bad-url-no-id">Job 5</a></li>\n'
-        '      <!-- Deduplication: same ID as Job 1 -->\n'
+        "      <!-- Deduplication: same ID as Job 1 -->\n"
         '      <li><a class="base-card__full-link" '
         'href="/jobs/view/duplicate-job-4419969671">Duplicate</a></li>\n'
         "    </ul>\n"

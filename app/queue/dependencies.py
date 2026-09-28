@@ -15,5 +15,5 @@ async def get_redis(request: Request) -> AsyncIterator[ArqRedis]:
     if not hasattr(request.app.state, "redis_pool"):
         settings: Settings = request.app.state.settings
         request.app.state.redis_pool = await create_queue_pool(settings)
-        
+
     yield request.app.state.redis_pool

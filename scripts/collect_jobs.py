@@ -11,7 +11,6 @@ from app.domain.jobs import JobSource
 from app.jobs.collection import CollectionCoordinator
 from app.jobs.registry import build_collector_registry
 from app.jobs.targets import CollectionTarget
-from typing import List
 
 
 async def main() -> None:
@@ -20,7 +19,7 @@ async def main() -> None:
         "--source",
         type=str,
         choices=["dice", "linkedin", "glassdoor", "hiringcafe"],
-        help="Source to scrape"
+        help="Source to scrape",
     )
     parser.add_argument("--all", action="store_true", help="Scrape all sources")
     parser.add_argument("--query", type=str, default="Software Engineer", help="Job search query")
@@ -31,17 +30,22 @@ async def main() -> None:
     settings = Settings()
     configure_logging(settings.log_level)
     database = Database(settings)
-    
+
     if not await database.check_connection():
         print("Database is unavailable")
         return
 
     registry = build_collector_registry()
     coordinator = CollectionCoordinator()
-    
-    sources_to_run: List[JobSource] = []
+
+    sources_to_run: list[JobSource] = []
     if args.all:
-        sources_to_run = [JobSource.DICE, JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.HIRINGCAFE]
+        sources_to_run = [
+            JobSource.DICE,
+            JobSource.LINKEDIN,
+            JobSource.GLASSDOOR,
+            JobSource.HIRINGCAFE,
+        ]
     elif args.source:
         sources_to_run = [JobSource(args.source)]
     else:
@@ -50,10 +54,7 @@ async def main() -> None:
 
     for source in sources_to_run:
         target = CollectionTarget(
-            source=source,
-            query=args.query,
-            location=args.location,
-            max_jobs=args.max_jobs
+            source=source, query=args.query, location=args.location, max_jobs=args.max_jobs
         )
         print(f"\n--- Running collection for {source.value} ---")
         collector = registry.resolve(source)
@@ -74,6 +75,7 @@ async def main() -> None:
             logging.exception(e)
 
     await database.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

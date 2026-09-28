@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -238,11 +240,16 @@ def test_dice_collector_is_registered() -> None:
 
 @pytest.mark.anyio
 async def test_dice_collector_parses_flight_push_chunks() -> None:
-    html = """
+    push_data = (
+        'some-prefix:{"jobList":{"data":[{"guid":"11111111-2222-3333-4444-555555555555",'
+        '"title":"Senior Python Developer",'
+        '"detailsPageUrl":"https://www.dice.com/job-detail/11111111-2222-3333-4444-555555555555"}]}}'
+    )
+    html = f"""
     <html>
       <body>
         <script>
-          self.__next_f.push([1, "some-prefix:{\\"jobList\\":{\\"data\\":[{\\"guid\\":\\"11111111-2222-3333-4444-555555555555\\",\\"title\\":\\"Senior Python Developer\\",\\"detailsPageUrl\\":\\"https://www.dice.com/job-detail/11111111-2222-3333-4444-555555555555\\"}]}}"]);
+          self.__next_f.push([1, {json.dumps(push_data)}]);
         </script>
       </body>
     </html>
