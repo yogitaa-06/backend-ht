@@ -20,6 +20,7 @@ from app.db.session import create_database_engine
 from app.domain.jobs import CanonicalJob, Company, GlobalJob, JobSourceObservation
 from app.domain.profiles import Profile
 from app.domain.resumes import CandidateProfile, Resume, ResumeStorageCleanup
+from app.domain.search import JobSearch, JobSearchResult
 from app.domain.security import IpAccessRule, SecurityAuditEvent
 
 _ = (
@@ -33,6 +34,8 @@ _ = (
     Company,
     CanonicalJob,
     JobSourceObservation,
+    JobSearch,
+    JobSearchResult,
 )
 
 

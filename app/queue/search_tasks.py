@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from app.core.config import Settings
 from app.db.session import Database
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,7 @@ async def run_job_search(ctx: dict[str, Any], search_id: UUID) -> None:
         async with database.sessions() as session:
             # Import dynamically to avoid circular dependencies if any
             from sqlalchemy import select
+
             from app.domain.search import JobSearch
             
             # Load the search record
@@ -36,7 +36,7 @@ async def run_job_search(ctx: dict[str, Any], search_id: UUID) -> None:
                     "job_search_missing",
                     extra={"search_id": str(search_id)},
                 )
-                return
+                raise RuntimeError("JobSearch not found")
                 
             if search.status == "completed":
                 logger.info(
@@ -45,19 +45,20 @@ async def run_job_search(ctx: dict[str, Any], search_id: UUID) -> None:
                 )
                 return
                 
-            # Transition to processing
-            search.status = "processing"
-            search.current_stage = "processing"
-            search.started_at = datetime.now(UTC)
-            await session.commit()
-            
-            logger.info(
-                "job_search_started",
-                extra={
-                    "search_id": str(search_id),
-                    "user_id": str(search.user_id),
-                }
-            )
+            # Transition to processing only if queued
+            if search.status == "queued":
+                search.status = "processing"
+                search.current_stage = "processing"
+                search.started_at = datetime.now(UTC)
+                await session.commit()
+                
+                logger.info(
+                    "job_search_started",
+                    extra={
+                        "search_id": str(search_id),
+                        "user_id": str(search.user_id),
+                    }
+                )
             
             # TODO: Future milestones will do real DB filtering and matching here
             
@@ -68,12 +69,16 @@ async def run_job_search(ctx: dict[str, Any], search_id: UUID) -> None:
             search.completed_at = datetime.now(UTC)
             await session.commit()
             
+            duration_ms = 0
+            if search.completed_at and search.started_at:
+                duration_ms = int((search.completed_at - search.started_at).total_seconds() * 1000)
+                
             logger.info(
                 "job_search_completed",
                 extra={
                     "search_id": str(search_id),
                     "user_id": str(search.user_id),
-                    "duration_ms": int((search.completed_at - search.started_at).total_seconds() * 1000)
+                    "duration_ms": duration_ms
                 }
             )
 

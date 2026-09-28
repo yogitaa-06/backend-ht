@@ -5,11 +5,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.v1.routes.search import router
+from app.api.v1.routes.search import get_search_service, router
 from app.auth.dependencies import get_current_profile
 from app.db.session import get_session
 from app.domain.profiles import Profile
-from app.api.v1.routes.search import get_search_service
 from app.domain.search import JobSearch
 
 
@@ -58,7 +57,9 @@ def test_get_search_progress_returns_status(
     app_client: TestClient, mock_search_service: AsyncMock
 ) -> None:
     search_id = uuid4()
-    mock_search = JobSearch(id=search_id, status="processing", current_stage="processing", progress=10)
+    mock_search = JobSearch(
+        id=search_id, status="processing", current_stage="processing", progress=10
+    )
     mock_search_service.get_search_progress.return_value = mock_search
 
     response = app_client.get(f"/api/v1/search/{search_id}/progress")

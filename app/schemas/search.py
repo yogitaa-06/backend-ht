@@ -1,6 +1,6 @@
 """Schemas for async search endpoints."""
 
-from typing import Generic, TypeVar
+from typing import TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,13 +37,13 @@ class AsyncSearchProgress(BaseModel):
     current_stage: str
     progress: int = Field(..., ge=0, le=100)
     error_message: str | None = None
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class SearchResultItem(JobResponse):
     """A matched job resulting from a search."""
-    
+
     rank: int
     match_score: float
     skills_score: float
@@ -52,7 +52,7 @@ class SearchResultItem(JobResponse):
     freshness_score: float
 
 
-class AsyncSearchResults(BaseModel, Generic[T]):
+class AsyncSearchResults[T](BaseModel):
     """Paginated search results."""
 
     search_id: UUID

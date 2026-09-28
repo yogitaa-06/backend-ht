@@ -20,11 +20,10 @@ router = APIRouter(prefix="/search")
 
 
 def get_search_service(
-    session: AsyncSession = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-    redis: ArqRedis = Depends(get_redis),
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    redis: Annotated[ArqRedis, Depends(get_redis)],
 ) -> SearchService:
-    """Dependency provider for SearchService."""
     repository = SearchRepository()
     return SearchService(repository, settings, redis)
 
@@ -48,13 +47,12 @@ async def start_search(
 ) -> AsyncSearchResponse:
     """
     Start an asynchronous job search.
-    
+
     Validates parameters, creates a search tracking record, and enqueues a background
     task to perform matching and ranking without blocking the HTTP request.
     """
     search = await service.start_search(session, profile.id, request)
-    await session.commit()
-    
+
     return AsyncSearchResponse(
         search_id=search.id,
         status=search.status,
@@ -76,7 +74,7 @@ async def get_search_progress(
     Retrieve the current progress and status of an asynchronous search.
     """
     search = await service.get_search_progress(session, profile.id, search_id)
-    
+
     return AsyncSearchProgress(
         search_id=search.id,
         status=search.status,

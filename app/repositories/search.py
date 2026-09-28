@@ -1,6 +1,6 @@
 """Data access for async job searches."""
 
-from typing import Sequence
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select

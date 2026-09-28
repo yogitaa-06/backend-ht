@@ -1,5 +1,6 @@
 """Business logic for async job searches."""
 
+import logging
 from uuid import UUID
 
 from arq.connections import ArqRedis
@@ -10,6 +11,8 @@ from app.core.config import Settings
 from app.domain.search import JobSearch
 from app.repositories.search import SearchRepository
 from app.schemas.search import AsyncSearchRequest
+
+logger = logging.getLogger(__name__)
 
 
 class SearchService:
@@ -36,14 +39,41 @@ class SearchService:
             experience_max=request.experience_max,
             requested_limit=request.limit,
         )
-        await self.repository.create_search(session, search)
-        
-        # Enqueue to ARQ
-        await self.redis.enqueue_job(
-            "run_job_search",
-            search.id,
-            _queue_name=self.settings.job_search_queue_name,
+        logger.info(
+            "job_search_created",
+            extra={"search_id": str(search.id), "user_id": str(user_id)},
         )
+        await self.repository.create_search(session, search)
+        await session.commit()
+        logger.info(
+            "job_search_committed",
+            extra={"search_id": str(search.id), "user_id": str(user_id)},
+        )
+        
+        try:
+            # Enqueue to ARQ
+            await self.redis.enqueue_job(
+                "run_job_search",
+                search.id,
+                _queue_name=self.settings.job_search_queue_name,
+            )
+            logger.info(
+                "job_search_enqueued",
+                extra={"search_id": str(search.id), "user_id": str(user_id)},
+            )
+        except Exception as exc:
+            logger.exception(
+                "job_search_enqueue_failed",
+                extra={"search_id": str(search.id), "user_id": str(user_id)},
+            )
+            search.status = "failed"
+            search.current_stage = "queue_failed"
+            search.error_message = "Failed to enqueue search task."
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to enqueue search task.",
+            ) from exc
         
         return search
 
@@ -60,8 +90,3 @@ class SearchService:
         return search
 
 
-def get_search_service(
-    session: AsyncSession, settings: Settings, redis: ArqRedis
-) -> SearchService:
-    """Dependency provider (concept). Actually, FastAPI dependencies should be configured properly."""
-    pass
