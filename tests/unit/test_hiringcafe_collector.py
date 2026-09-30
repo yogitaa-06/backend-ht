@@ -93,7 +93,7 @@ class MockPlaywright:
 
 
 @pytest.mark.anyio
-@patch("app.jobs.sources.hiringcafe.async_playwright")
+@patch("app.jobs.sources.hiringcafe.collector.async_playwright")
 async def test_hiringcafe_collector_respects_max_jobs(mock_pw: MagicMock) -> None:
     hits = [{"id": f"job-{i}", "job_information": {"title": f"Title {i}"}} for i in range(5)]
     search_page = MockPage(next_data_hits=hits)
@@ -112,7 +112,7 @@ async def test_hiringcafe_collector_respects_max_jobs(mock_pw: MagicMock) -> Non
 
 
 @pytest.mark.anyio
-@patch("app.jobs.sources.hiringcafe.async_playwright")
+@patch("app.jobs.sources.hiringcafe.collector.async_playwright")
 async def test_hiringcafe_collector_extracts_all_fields(mock_pw: MagicMock) -> None:
     hits = [
         {
@@ -155,7 +155,7 @@ async def test_hiringcafe_collector_extracts_all_fields(mock_pw: MagicMock) -> N
 
 
 @pytest.mark.anyio
-@patch("app.jobs.sources.hiringcafe.async_playwright")
+@patch("app.jobs.sources.hiringcafe.collector.async_playwright")
 async def test_hiringcafe_maps_on_site_to_non_remote(mock_pw: MagicMock) -> None:
     hits = [
         {
@@ -174,7 +174,7 @@ async def test_hiringcafe_maps_on_site_to_non_remote(mock_pw: MagicMock) -> None
 
 
 @pytest.mark.anyio
-@patch("app.jobs.sources.hiringcafe.async_playwright")
+@patch("app.jobs.sources.hiringcafe.collector.async_playwright")
 async def test_hiringcafe_collector_handles_malformed_job(mock_pw: MagicMock) -> None:
     hits: list[dict[str, Any]] = [
         {"v5_processed_job_data": {}},

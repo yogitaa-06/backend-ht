@@ -9,7 +9,7 @@ from app.core.logging import configure_logging
 from app.db.session import Database
 from app.domain.jobs import JobSource
 from app.jobs.collection import CollectionCoordinator
-from app.jobs.registry import build_collector_registry
+from app.jobs.sources.registry import build_collector_registry
 from app.jobs.targets import CollectionTarget
 
 

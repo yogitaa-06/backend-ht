@@ -12,7 +12,7 @@ from app.core.logging import configure_logging
 from app.db.session import Database
 from app.jobs.collection import CollectionCoordinator
 from app.jobs.locks import RedisCollectionLockManager
-from app.jobs.registry import build_collector_registry
+from app.jobs.sources.registry import build_collector_registry
 from app.queue.client import redis_settings_from_app
 from app.queue.scheduler import schedule_due_collections
 from app.queue.tasks import run_job_collection

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.ingestion import CanonicalJobIngestionService
 from app.jobs.normalization import NormalizedJob, RawSourceJob, normalize_job
-from app.jobs.registry import JobSourceCollector
+from app.jobs.sources.base import JobSourceCollector
 from app.jobs.targets import CollectionTarget
 from app.repositories.jobs import (
     GlobalJobRepository,

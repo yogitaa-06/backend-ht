@@ -19,7 +19,7 @@ from app.jobs.errors import (
     TemporaryCollectionError,
 )
 from app.jobs.locks import CollectionLockManager
-from app.jobs.registry import CollectorRegistry
+from app.jobs.sources.registry import CollectorRegistry
 from app.jobs.targets import CollectionTarget
 
 logger = logging.getLogger(__name__)

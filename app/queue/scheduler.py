@@ -14,7 +14,7 @@ from app.core.config import Settings
 from app.db.session import Database
 from app.domain.jobs import JobSource
 from app.domain.resumes import CandidateProfile, Resume, ResumeStatus
-from app.jobs.registry import CollectorRegistry
+from app.jobs.sources.registry import CollectorRegistry
 from app.jobs.targets import CollectionTarget
 
 logger = logging.getLogger(__name__)
