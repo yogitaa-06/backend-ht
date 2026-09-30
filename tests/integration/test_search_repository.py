@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
@@ -29,8 +29,8 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def database() -> Iterator[Database]:
+@pytest.fixture
+async def database() -> AsyncIterator[Database]:
     assert TEST_DATABASE_URL is not None
     environment = os.environ.copy()
     environment.update(
@@ -56,13 +56,7 @@ def database() -> Iterator[Database]:
     )
     db = Database(settings)
     yield db
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-        _task = loop.create_task(db.close())
-    except RuntimeError:
-        asyncio.run(db.close())
+    await db.close()
 
 
 @pytest.fixture
@@ -74,7 +68,7 @@ async def test_create_and_get_search(database: Database, repository: SearchRepos
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test@example.com", is_active=True)
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id, status=SearchStatus.QUEUED, query="Software Engineer", requested_limit=10
     )
@@ -97,7 +91,7 @@ async def test_get_search_enforces_ownership(
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test2@example.com", is_active=True)
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.QUEUED,
@@ -116,7 +110,7 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test3@example.com", is_active=True)
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -146,8 +140,8 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
         await repository.create_search(session, search)
 
         results = [
-            JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9),
-            JobSearchResult(search_id=search.id, job_id=job2.id, rank=2, match_score=0.8),
+            JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9, skills_score=0.9, experience_score=0.9, location_score=0.9, freshness_score=0.9),
+            JobSearchResult(search_id=search.id, job_id=job2.id, rank=2, match_score=0.8, skills_score=0.8, experience_score=0.8, location_score=0.8, freshness_score=0.8),
         ]
         await repository.save_results(session, results)
 
@@ -168,7 +162,7 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test4@example.com", is_active=True)
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -189,7 +183,7 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
         await session.flush()
 
         await repository.create_search(session, search)
-        results = [JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9)]
+        results = [JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9, skills_score=0.9, experience_score=0.9, location_score=0.9, freshness_score=0.9)]
         await repository.save_results(session, results)
 
     async with database.sessions() as session, session.begin():

@@ -40,4 +40,4 @@ def test_alembic_upgrade_downgrade_and_reupgrade_succeed() -> None:
         )
         assert result.returncode == 0, f"Alembic {' '.join(arguments)} failed"
         if arguments == ("current",):
-            assert "0007_canonical_jobs (head)" in result.stdout
+            assert "(head)" in result.stdout

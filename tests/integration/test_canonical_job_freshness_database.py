@@ -29,8 +29,10 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def database() -> Database:
+from collections.abc import AsyncIterator
+
+@pytest.fixture
+async def database() -> AsyncIterator[Database]:
     assert TEST_DATABASE_URL is not None
     environment = os.environ.copy()
     environment.update(
@@ -54,7 +56,9 @@ def database() -> Database:
         database_url=SecretStr(TEST_DATABASE_URL),
         database_ssl_mode="disable",
     )
-    return Database(settings)
+    db = Database(settings)
+    yield db
+    await db.close()
 
 
 @pytest.fixture
@@ -73,7 +77,7 @@ async def test_deactivate_stale_sources_deactivates_job_when_no_active_sources_r
     company_id = uuid4()
 
     async with database.sessions() as session, session.begin():
-        company = Company(id=company_id, name="Stale Company", normalized_name="stale company")
+        company = Company(id=company_id, name=f"Stale Company {company_id}", normalized_name=f"stale company {company_id}")
         job = CanonicalJob(
             id=job_id,
             company_id=company_id,
@@ -89,8 +93,28 @@ async def test_deactivate_stale_sources_deactivates_job_when_no_active_sources_r
             source_job_id=str(uuid4()),
             is_active=True,
             last_seen_at=stale_threshold - timedelta(hours=1),  # Very old
+            content_hash="test_hash_1",
         )
-        session.add_all([company, job, source])
+        other_job_id = uuid4()
+        recent_source = JobSourceObservation(
+            job_id=other_job_id,
+            source="dice",
+            source_job_id=str(uuid4()),
+            is_active=True,
+            last_seen_at=now,
+            content_hash="test_hash_healthy",
+        )
+        # We need to insert a job for the other_job_id too
+        other_job = CanonicalJob(
+            id=other_job_id,
+            company_id=company_id,
+            title="Other Job",
+            normalized_title="other job",
+            role_family="engineering",
+            canonical_hash=str(uuid4()),
+            is_active=True,
+        )
+        session.add_all([company, job, source, other_job, recent_source])
 
     async with database.sessions() as session, session.begin():
         count = await repository.deactivate_stale_sources(
@@ -125,7 +149,7 @@ async def test_canonical_job_remains_active_if_another_source_is_active(
 
     async with database.sessions() as session, session.begin():
         company = Company(
-            id=company_id, name="Multi Source Company", normalized_name="multi source company"
+            id=company_id, name=f"Multi Source Company {company_id}", normalized_name=f"multi source company {company_id}"
         )
         job = CanonicalJob(
             id=job_id,
@@ -142,6 +166,7 @@ async def test_canonical_job_remains_active_if_another_source_is_active(
             source_job_id=str(uuid4()),
             is_active=True,
             last_seen_at=stale_threshold - timedelta(hours=1),  # Stale
+            content_hash="test_hash_2",
         )
         source2 = JobSourceObservation(
             job_id=job_id,
@@ -149,8 +174,27 @@ async def test_canonical_job_remains_active_if_another_source_is_active(
             source_job_id=str(uuid4()),
             is_active=True,
             last_seen_at=now,  # Active
+            content_hash="test_hash_3",
         )
-        session.add_all([company, job, source1, source2])
+        other_job_id = uuid4()
+        recent_dice_source = JobSourceObservation(
+            job_id=other_job_id,
+            source="dice",
+            source_job_id=str(uuid4()),
+            is_active=True,
+            last_seen_at=now,
+            content_hash="test_hash_healthy_2",
+        )
+        other_job = CanonicalJob(
+            id=other_job_id,
+            company_id=company_id,
+            title="Other Job 2",
+            normalized_title="other job 2",
+            role_family="engineering",
+            canonical_hash=str(uuid4()),
+            is_active=True,
+        )
+        session.add_all([company, job, source1, source2, other_job, recent_dice_source])
 
     async with database.sessions() as session, session.begin():
         # Only deactivating dice

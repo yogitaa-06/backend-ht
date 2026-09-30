@@ -28,8 +28,10 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def database() -> Database:
+from collections.abc import AsyncIterator
+
+@pytest.fixture
+async def database() -> AsyncIterator[Database]:
     assert TEST_DATABASE_URL is not None
     environment = os.environ.copy()
     environment.update(
@@ -53,7 +55,9 @@ def database() -> Database:
         database_url=SecretStr(TEST_DATABASE_URL),
         database_ssl_mode="disable",
     )
-    return Database(settings)
+    db = Database(settings)
+    yield db
+    await db.close()
 
 
 @pytest.fixture
