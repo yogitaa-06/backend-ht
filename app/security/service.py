@@ -12,8 +12,8 @@ from app.core.config import Settings
 from app.core.errors import ApplicationError
 from app.domain.profiles import Profile
 from app.domain.security import IpAccessRule, SecurityAuditEvent, SecurityAuditEventType
-from app.repositories.security import IpRuleRepository, SecurityAuditRepository
 from app.security.ip import IpAddress, address_in_networks, normalize_ip, normalize_network
+from app.security.repository import IpRuleRepository, SecurityAuditRepository
 
 _JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _SENSITIVE_TERMS = (

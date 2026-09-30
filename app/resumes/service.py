@@ -12,17 +12,17 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.config import Settings
 from app.core.errors import ApplicationError
 from app.domain.resumes import CandidateProfile, Resume, ResumeStatus, ResumeStorageCleanup
-from app.repositories.resumes import (
-    CandidateProfileRepository,
-    ResumeRepository,
-    ResumeStorageCleanupRepository,
-)
 from app.resumes.execution import (
     InlineResumeParseExecutor,
     ResumeParseExecutor,
     ResumeParserExecutionError,
 )
 from app.resumes.parser import ResumeParser
+from app.resumes.repository import (
+    CandidateProfileRepository,
+    ResumeRepository,
+    ResumeStorageCleanupRepository,
+)
 from app.resumes.storage import (
     ResumeStorage,
     ResumeStorageError,

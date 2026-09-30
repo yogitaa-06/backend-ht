@@ -12,7 +12,7 @@ from app.repositories.canonical_jobs import (
     CanonicalJobRead,
     CanonicalJobRepository,
 )
-from app.repositories.resumes import CandidateProfileRepository
+from app.resumes.repository import CandidateProfileRepository
 
 
 class JobService:

@@ -15,9 +15,9 @@ from app.core.config import Settings
 from app.core.errors import ApplicationError, application_error_handler
 from app.db.session import get_database
 from app.domain.security import SecurityAuditEventType
-from app.repositories.security import IpRuleRepository
 from app.security.ip import IpAddress, TrustedClientIpResolver, address_in_networks
 from app.security.rate_limit import RateLimitStoreError, RouteRateLimiter
+from app.security.repository import IpRuleRepository
 from app.security.service import add_audit_event, audit_context
 
 logger = logging.getLogger(__name__)

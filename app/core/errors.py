@@ -51,6 +51,41 @@ class InfrastructureError(ApplicationError):
         super().__init__(code, message, status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
+class DomainValidationError(ApplicationError):
+    """A use-case input violates a domain rule."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+class ConflictError(ApplicationError):
+    """A requested state transition conflicts with current state."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_409_CONFLICT)
+
+
+class AuthenticationError(ApplicationError):
+    """Authentication credentials are absent or invalid."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_401_UNAUTHORIZED)
+
+
+class AuthorizationError(ApplicationError):
+    """The authenticated principal lacks permission."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_403_FORBIDDEN)
+
+
+class ExternalServiceError(ApplicationError):
+    """An upstream service failed to satisfy a valid request."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_502_BAD_GATEWAY)
+
+
 def _error_response(
     *,
     request: Request,
