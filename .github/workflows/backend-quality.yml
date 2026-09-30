@@ -33,7 +33,7 @@ jobs:
     env:
       HIREANDTECH_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hireandtech_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.9"
