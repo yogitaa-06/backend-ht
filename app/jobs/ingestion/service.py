@@ -12,7 +12,9 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.jobs import CanonicalJob, Company, JobSourceObservation
-from app.jobs.normalization import NormalizedJob
+from app.jobs.ingestion.deduplication import ConservativeJobDeduplicator
+from app.jobs.ingestion.freshness import mark_canonical_seen
+from app.jobs.ingestion.normalization import NormalizedJob
 from app.repositories.canonical_jobs import CanonicalJobRepository
 
 logger = logging.getLogger(__name__)
@@ -49,9 +51,11 @@ class CanonicalJobIngestionService:
         self,
         repository: CanonicalJobRepository | None = None,
         *,
+        deduplicator: ConservativeJobDeduplicator | None = None,
         clock: Clock | None = None,
     ) -> None:
         self.repository = repository or CanonicalJobRepository()
+        self.deduplicator = deduplicator or ConservativeJobDeduplicator()
         self.clock = clock or (lambda: datetime.now(UTC))
 
     async def ingest(self, session: AsyncSession, job: NormalizedJob) -> IngestionResult:
@@ -93,16 +97,18 @@ class CanonicalJobIngestionService:
         canonical = await self.repository.find_job_by_source_url(
             session, source=job.source, source_url=job.job_url
         )
-        canonical_created = canonical is None
-        if canonical is None:
+        decision = self.deduplicator.evaluate_same_source_url(canonical)
+        canonical_created = not decision.should_merge
+        if not decision.should_merge:
             # A canonical hash is a candidate-search aid, not identity proof. Two
             # Dice IDs with matching text may still be separate requisitions.
             canonical = await self.repository.create_job(
                 session, job, company=company, observed_at=observed_at
             )
         else:
-            canonical.last_seen_at = observed_at
-            canonical.is_active = True
+            if canonical is None:  # pragma: no cover - decision invariant
+                raise RuntimeError("deduplicator selected a missing canonical job")
+            mark_canonical_seen(canonical, observed_at)
         source = await self.repository.create_source(
             session, job, canonical_job=canonical, observed_at=observed_at
         )

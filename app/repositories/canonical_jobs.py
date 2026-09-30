@@ -14,8 +14,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.jobs import CanonicalJob, Company, JobSourceObservation
-from app.jobs.canonicalization import build_canonical_hash
-from app.jobs.normalization import NormalizedJob
+from app.jobs.ingestion.canonicalization import build_canonical_hash
+from app.jobs.ingestion.normalization import NormalizedJob
 
 
 @dataclass(frozen=True)
