@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,12 @@ class SearchRepository:
         stmt = select(JobSearch).where(JobSearch.id == search_id)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def clear_results(self, session: AsyncSession, search_id: UUID) -> None:
+        """Clear existing results for a search."""
+        stmt = delete(JobSearchResult).where(JobSearchResult.search_id == search_id)
+        await session.execute(stmt)
+        await session.flush()
 
     async def save_results(self, session: AsyncSession, results: list[JobSearchResult]) -> None:
         """Save a batch of search results."""

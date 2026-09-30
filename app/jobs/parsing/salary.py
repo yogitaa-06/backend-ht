@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 # Currency symbol mapping
 _CURRENCY_MAP: dict[str, str] = {
@@ -72,7 +72,7 @@ def _parse_amount(raw_str: str, has_k: bool) -> Decimal | None:
         if has_k:
             val *= 1000
         return val
-    except Exception:
+    except (ValueError, TypeError, InvalidOperation):
         return None
 
 

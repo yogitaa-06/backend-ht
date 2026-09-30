@@ -68,6 +68,17 @@ class FakeCanonicalRepository:
                 return self.jobs[observation.job_id]
         return None
 
+    async def find_dedup_candidates(
+        self,
+        session: object,
+        *,
+        company_id: UUID,
+        normalized_title: str,
+    ) -> list[CanonicalJob]:
+        del session
+        # For tests, just return empty to avoid complex mock logic unless needed.
+        return []
+
     async def create_job(
         self,
         session: object,

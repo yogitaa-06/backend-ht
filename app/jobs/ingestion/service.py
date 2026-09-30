@@ -98,13 +98,27 @@ class CanonicalJobIngestionService:
             session, source=job.source, source_url=job.job_url
         )
         decision = self.deduplicator.evaluate_same_source_url(canonical)
-        canonical_created = not decision.should_merge
+        canonical_created = False
+
+        if not decision.should_merge and company:
+            candidates = await self.repository.find_dedup_candidates(
+                session,
+                company_id=company.id,
+                normalized_title=job.normalized_title,
+            )
+            for candidate in candidates:
+                cross_decision = self.deduplicator.evaluate_cross_source_candidate(candidate, job)
+                if cross_decision.should_merge:
+                    decision = cross_decision
+                    canonical = candidate
+                    break
+
         if not decision.should_merge:
-            # A canonical hash is a candidate-search aid, not identity proof. Two
-            # Dice IDs with matching text may still be separate requisitions.
+            # A canonical hash is a candidate-search aid, not identity proof.
             canonical = await self.repository.create_job(
                 session, job, company=company, observed_at=observed_at
             )
+            canonical_created = True
         else:
             if canonical is None:  # pragma: no cover - decision invariant
                 raise RuntimeError("deduplicator selected a missing canonical job")

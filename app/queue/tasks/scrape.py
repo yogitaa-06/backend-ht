@@ -149,10 +149,10 @@ async def run_job_collection(
         result = _result(target, started_at=started_at, status="failed", lock_acquired=True)
         logger.exception("job_collection_failed", extra=result)
         return result
-    except Exception:
+    except Exception as exc:
         result = _result(target, started_at=started_at, status="failed", lock_acquired=True)
         logger.exception("job_collection_failed", extra=result)
-        return result
+        raise exc
     finally:
         try:
             released = await asyncio.shield(lease.release())

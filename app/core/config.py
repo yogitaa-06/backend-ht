@@ -141,9 +141,14 @@ class Settings(BaseSettings):
         default="hireandtech", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9:_-]+$"
     )
     job_collection_proxy_url: SecretStr | None = None
+    job_stale_after_hours: int = Field(default=48, ge=1, le=720)
+    job_stale_safety_hours: int = Field(default=12, ge=1, le=168)
     job_collection_targets: list[CollectionTarget] = Field(
         default_factory=default_collection_targets
     )
+    search_candidate_limit: int = Field(default=2000, ge=100, le=10000)
+    search_default_page_size: int = Field(default=20, ge=1, le=100)
+    search_max_page_size: int = Field(default=100, ge=1, le=500)
 
     @field_validator("trusted_proxy_cidrs", "ip_emergency_bypass_cidrs", mode="before")
     @classmethod

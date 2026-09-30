@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.jobs import CanonicalJob, Company, JobSourceObservation
 from app.jobs.ingestion.canonicalization import build_canonical_hash
 from app.jobs.ingestion.normalization import NormalizedJob
+from app.jobs.types import RemoteType
 
 
 @dataclass(frozen=True)
@@ -222,6 +223,76 @@ class CanonicalJobRepository:
         )
 
         return canonical
+
+    async def find_dedup_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        company_id: UUID,
+        normalized_title: str,
+    ) -> Sequence[CanonicalJob]:
+        """Find active canonical jobs that might match a new listing."""
+        statement = (
+            select(CanonicalJob)
+            .where(
+                CanonicalJob.company_id == company_id,
+                CanonicalJob.is_active.is_(True),
+                # For safety and performance, we constrain candidates to exact normalized title.
+                # If we want fuzzy matching later, we can loosen this.
+                CanonicalJob.normalized_title == normalized_title,
+            )
+            .order_by(CanonicalJob.posted_at.desc().nullslast(), CanonicalJob.id)
+            .limit(10)
+        )
+        result = await session.execute(statement)
+        return result.scalars().all()
+
+    async def deactivate_stale_sources(
+        self,
+        session: AsyncSession,
+        *,
+        source: str,
+        stale_threshold: datetime,
+        safety_window_start: datetime,
+    ) -> int:
+        """Deactivate sources not seen recently, if collection is demonstrably healthy."""
+        health_check = await session.scalar(
+            select(func.max(JobSourceObservation.last_seen_at)).where(
+                JobSourceObservation.source == source
+            )
+        )
+
+        if not health_check or health_check < safety_window_start:
+            return 0
+
+        result = await session.execute(
+            update(JobSourceObservation)
+            .where(
+                JobSourceObservation.source == source,
+                JobSourceObservation.is_active.is_(True),
+                JobSourceObservation.last_seen_at < stale_threshold,
+            )
+            .values(is_active=False)
+        )
+        deactivated_count = getattr(result, "rowcount", 0)
+
+        if deactivated_count > 0:
+            # Sync canonical jobs: become inactive if they have no active sources
+            await session.execute(
+                update(CanonicalJob)
+                .where(
+                    CanonicalJob.is_active.is_(True),
+                    ~exists(
+                        select(1).where(
+                            JobSourceObservation.job_id == CanonicalJob.id,
+                            JobSourceObservation.is_active.is_(True),
+                        )
+                    ),
+                )
+                .values(is_active=False)
+            )
+
+        return int(deactivated_count or 0)
 
     async def create_job(
         self,
@@ -535,7 +606,7 @@ def _remote_type(
     if remote is None:
         return None
 
-    return "remote" if remote else "on_site"
+    return RemoteType.REMOTE if remote else RemoteType.ON_SITE
 
 
 def _remote_bool(
@@ -546,10 +617,10 @@ def _remote_bool(
     if remote_type is None:
         return None
 
-    if remote_type == "remote":
+    if remote_type == RemoteType.REMOTE:
         return True
 
-    if remote_type == "on_site":
+    if remote_type == RemoteType.ON_SITE:
         return False
 
     return None

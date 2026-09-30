@@ -15,6 +15,7 @@ from app.jobs.sources.registry import build_collector_registry
 from app.queue.connection import redis_settings_from_app
 from app.queue.locks import RedisCollectionLockManager
 from app.queue.scheduler.collection import schedule_due_collections
+from app.queue.tasks.freshness import deactivate_stale_jobs_cron
 from app.queue.tasks.scrape import run_job_collection
 
 _settings = Settings()
@@ -65,7 +66,14 @@ class ScrapeWorkerSettings:
             run_at_startup=True,
             unique=True,
             max_tries=1,
-        )
+        ),
+        cron(
+            deactivate_stale_jobs_cron,
+            minute={30},
+            run_at_startup=True,
+            unique=True,
+            max_tries=1,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown

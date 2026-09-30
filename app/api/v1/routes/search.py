@@ -4,7 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 from arq.connections import ArqRedis
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_profile
@@ -12,7 +12,13 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.domain.profiles import Profile
 from app.queue.dependencies import get_redis
-from app.schemas.search import AsyncSearchProgress, AsyncSearchRequest, AsyncSearchResponse
+from app.schemas.search import (
+    AsyncSearchProgress,
+    AsyncSearchRequest,
+    AsyncSearchResponse,
+    AsyncSearchResults,
+    SearchResultItem,
+)
 from app.search.repository import SearchRepository
 from app.search.service import SearchService
 
@@ -81,4 +87,39 @@ async def get_search_progress(
         current_stage=search.current_stage,
         progress=search.progress,
         error_message=search.error_message,
+    )
+
+
+@router.get(
+    "/{search_id}/results",
+    response_model=AsyncSearchResults[SearchResultItem],
+    tags=["search"],
+)
+async def get_search_results(
+    search_id: UUID,
+    profile: profile_dep,
+    session: session_dep,
+    service: service_dep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> AsyncSearchResults[SearchResultItem]:
+    """
+    Retrieve paginated results for a completed search.
+    """
+    search, items, total = await service.get_search_results(
+        session, profile.id, search_id, page, page_size
+    )
+
+    import math
+
+    pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return AsyncSearchResults(
+        search_id=search.id,
+        status=search.status,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
     )

@@ -3,8 +3,8 @@
 > Historical planning document. For implemented behavior and current gaps, use
 > [architecture.md](architecture.md). Sections below may describe planned systems.
 
-> **Document version**: 4.0  
-> **Last verified against codebase**: 2026-09-26  
+> **Document version**: 4.0
+> **Last verified against codebase**: 2026-09-26
 > **Repository**: `backend-ht` (`origin/main` @ `285ce61`)
 
 ---
@@ -834,7 +834,7 @@ CollectionError (base)
 4. Add Docker Compose services for each worker pool.
 5. Update health check to monitor all queue depths.
 
-**Estimated effort**: 2–3 days  
+**Estimated effort**: 2–3 days
 **Risk**: Low — refactoring existing working code into separate entry points.
 
 ---
@@ -858,7 +858,7 @@ CollectionError (base)
    - Updates `job_matches.ai_strengths`, `ai_concerns`, `ai_tips`.
 6. Update `GET /api/v1/jobs/recommended` to read from `job_matches` when available.
 
-**Estimated effort**: 4–5 days  
+**Estimated effort**: 4–5 days
 **Risk**: Medium — new schema, new worker task, LLM integration.
 
 ---
@@ -883,7 +883,7 @@ CollectionError (base)
 5. Update search worker to write progress to Redis at each stage.
 6. Add TTL on Redis search state (e.g., 24 hours).
 
-**Estimated effort**: 3–4 days  
+**Estimated effort**: 3–4 days
 **Risk**: Low — well-defined pattern (job ticket + polling).
 
 ---
@@ -906,7 +906,7 @@ CollectionError (base)
    - Create `POST /api/v1/jobs/{job_id}/apply` route.
    - Create `GET /api/v1/applications` route.
 
-**Estimated effort**: 3–4 days  
+**Estimated effort**: 3–4 days
 **Risk**: Low — standard patterns with existing protocol interfaces.
 
 ---

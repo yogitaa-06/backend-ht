@@ -77,4 +77,3 @@ result in 403.
 | AI costs | Not implemented in current backend |
 | Redis/ARQ/scraper monitoring | Not implemented in current backend |
 | Admin user creation | Not implemented; requires Supabase Admin API integration |
-

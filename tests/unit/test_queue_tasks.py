@@ -8,7 +8,7 @@ from arq import Retry
 
 from app.domain.jobs import JobSource
 from app.jobs.collection import CoordinatorResult
-from app.jobs.errors import TemporaryCollectionError
+from app.jobs.errors import PermanentCollectionError, TemporaryCollectionError
 from app.jobs.normalization import RawSourceJob
 from app.jobs.registry import CollectorRegistry
 from app.jobs.targets import CollectionTarget
@@ -120,7 +120,7 @@ async def test_task_returns_counts_and_releases_lock_after_success() -> None:
 async def test_task_releases_lock_after_permanent_failure() -> None:
     lease = FakeLease()
     result = await run_job_collection(
-        context(lease=lease, error=RuntimeError("boom")),
+        context(lease=lease, error=PermanentCollectionError("boom")),
         "dice",
         "DevOps Engineer",
         None,
