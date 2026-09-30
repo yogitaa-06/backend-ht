@@ -2,6 +2,8 @@ from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from arq import Retry
@@ -143,3 +145,61 @@ async def test_task_retries_temporary_failure_and_releases_lock() -> None:
         )
 
     assert lease.released
+
+
+@pytest.mark.anyio
+async def test_run_job_search_delegates_to_service() -> None:
+    from app.queue.tasks.search import run_job_search
+    from app.search.execution import SearchExecutionService
+
+    class FakeDb:
+        def sessions(self) -> AsyncContext:
+            return AsyncContext()
+
+    fake_executor = AsyncMock(spec=SearchExecutionService)
+    search_id = uuid4()
+    ctx = {
+        "database": FakeDb(),
+        "search_executor": fake_executor,
+    }
+
+    await run_job_search(ctx, search_id)
+
+    fake_executor.execute.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_deactivate_stale_jobs_cron_isolates_failures() -> None:
+    from app.queue.tasks.freshness import deactivate_stale_jobs_cron
+
+    class FakeDb:
+        def sessions(self) -> AsyncContext:
+            return AsyncContext()
+
+    fake_settings = AsyncMock()
+    fake_settings.job_stale_after_hours = 24
+    fake_settings.job_stale_safety_hours = 2
+
+    # Patch the repository to fail on DICE but succeed on others
+    fake_repo = AsyncMock()
+
+    async def fake_deactivate(session: AsyncContext, **kwargs: object) -> int:
+        if kwargs.get("source") == "dice":
+            raise RuntimeError("Database error on dice")
+        return 5
+
+    fake_repo.deactivate_stale_sources = fake_deactivate
+
+    ctx = {
+        "database": FakeDb(),
+        "settings": fake_settings,
+    }
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr("app.queue.tasks.freshness.CanonicalJobRepository", lambda: fake_repo)
+        results = await deactivate_stale_jobs_cron(ctx)
+
+    # DICE should fail but not break the others
+    assert "dice" not in results
+    assert results["linkedin"] == 5
+    assert results["glassdoor"] == 5
