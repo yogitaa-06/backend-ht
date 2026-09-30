@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.jobs.types import RemoteType
+
 
 class JobResponse(BaseModel):
     id: UUID
@@ -32,7 +34,7 @@ class JobResponse(BaseModel):
     salary_max: float | None = None
     salary_currency: str | None = None
     salary_period: str | None = None
-    remote_type: str | None = None
+    remote_type: RemoteType | None = None
     match_score: float | None = None
     role_score: float | None = None
     skills_score: float | None = None

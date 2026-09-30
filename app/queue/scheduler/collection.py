@@ -177,10 +177,7 @@ async def schedule_due_collections(ctx: dict[str, Any]) -> dict[str, int | str]:
         if not claimed:
             continue
 
-        if (
-            source == JobSource.GLASSDOOR
-            and getattr(settings, "glassdoor_collection_batch_size", 0) > 0
-        ):
+        if source == JobSource.GLASSDOOR and settings.glassdoor_collection_batch_size > 0:
             active_targets = await _rotate_queries(
                 redis,
                 source.value,

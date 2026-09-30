@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, IdentityTimestampMixin
 from app.domain.jobs import CanonicalJob
 from app.domain.profiles import Profile
+from app.jobs.types import RemoteType, SearchStatus
 
 
 class JobSearch(IdentityTimestampMixin, Base):
@@ -36,11 +37,13 @@ class JobSearch(IdentityTimestampMixin, Base):
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    status: Mapped[SearchStatus] = mapped_column(
+        String(32), nullable=False, default=SearchStatus.QUEUED
+    )
 
     query: Mapped[str | None] = mapped_column(String(200))
     location: Mapped[str | None] = mapped_column(String(200))
-    remote_type: Mapped[str | None] = mapped_column(String(32))
+    remote_type: Mapped[RemoteType | None] = mapped_column(String(32))
     job_type: Mapped[str | None] = mapped_column(String(100))
     experience_min: Mapped[int | None] = mapped_column(Integer)
     experience_max: Mapped[int | None] = mapped_column(Integer)

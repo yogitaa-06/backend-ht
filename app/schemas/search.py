@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.jobs.types import RemoteType, SearchStatus
 from app.schemas.jobs import JobResponse
 
 T = TypeVar("T")
@@ -15,7 +16,7 @@ class AsyncSearchRequest(BaseModel):
 
     query: str | None = Field(None, max_length=200)
     location: str | None = Field(None, max_length=200)
-    remote_type: str | None = Field(None, max_length=32)
+    remote_type: RemoteType | None = None
     job_type: str | None = Field(None, max_length=100)
     experience_min: int | None = Field(None, ge=0)
     experience_max: int | None = Field(None, ge=0)
@@ -26,14 +27,14 @@ class AsyncSearchResponse(BaseModel):
     """Response when starting a new async search."""
 
     search_id: UUID
-    status: str = "queued"
+    status: SearchStatus = SearchStatus.QUEUED
 
 
 class AsyncSearchProgress(BaseModel):
     """Progress status of an async search."""
 
     search_id: UUID
-    status: str
+    status: SearchStatus
     current_stage: str
     progress: int = Field(..., ge=0, le=100)
     error_message: str | None = None
@@ -56,7 +57,7 @@ class AsyncSearchResults[T](BaseModel):
     """Paginated search results."""
 
     search_id: UUID
-    status: str
+    status: SearchStatus
     items: list[T]
     total: int
     page: int
