@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
 
+from app.core.errors import InfrastructureError
 from app.schemas.search import AsyncSearchRequest
-from app.services.search import SearchService
+from app.search.service import SearchService
 
 
 @pytest.fixture
@@ -64,11 +64,11 @@ async def test_start_search_handles_enqueue_failure(
     # Simulate enqueue failure
     mock_redis.enqueue_job.side_effect = Exception("Redis offline")
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(InfrastructureError) as exc_info:
         await search_service.start_search(session, user_id, request)
 
-    assert exc_info.value.status_code == 500
-    assert "Failed to enqueue" in exc_info.value.detail
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == "SEARCH_QUEUE_UNAVAILABLE"
 
     # The failure state should be committed
     assert session.commit.call_count == 2

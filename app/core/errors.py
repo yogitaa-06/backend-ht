@@ -37,6 +37,20 @@ class ApplicationError(Exception):
     headers: Mapping[str, str] | None = None
 
 
+class NotFoundError(ApplicationError):
+    """A requested domain entity does not exist or is not visible."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_404_NOT_FOUND)
+
+
+class InfrastructureError(ApplicationError):
+    """Required infrastructure could not complete an operation."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
 def _error_response(
     *,
     request: Request,

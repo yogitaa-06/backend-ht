@@ -12,9 +12,9 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.domain.profiles import Profile
 from app.queue.dependencies import get_redis
-from app.repositories.search import SearchRepository
 from app.schemas.search import AsyncSearchProgress, AsyncSearchRequest, AsyncSearchResponse
-from app.services.search import SearchService
+from app.search.repository import SearchRepository
+from app.search.service import SearchService
 
 router = APIRouter(prefix="/search")
 

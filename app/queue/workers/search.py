@@ -9,6 +9,7 @@ from app.core.logging import configure_logging
 from app.db.session import Database
 from app.queue.client import redis_settings_from_app
 from app.queue.search_tasks import run_job_search
+from app.search.execution import SearchExecutionService
 
 _settings = Settings()
 
@@ -23,6 +24,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         raise RuntimeError("Database is unavailable; search worker startup aborted")
     ctx["settings"] = settings
     ctx["database"] = database
+    ctx["search_executor"] = SearchExecutionService()
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
