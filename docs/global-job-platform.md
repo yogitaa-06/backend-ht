@@ -1,5 +1,9 @@
 # Phase 1A — Dice canonical global job ingestion
 
+> Historical implementation record. Current ownership and migration status live in
+> [job-ingestion.md](job-ingestion.md) and
+> [canonical-job-migration.md](canonical-job-migration.md).
+
 HireAndTech collects a platform-wide job pool on a schedule. Collection is not
 triggered by searches, recommendations, resumes, or individual users. This keeps
 source load bounded and gives every user a consistent view of observed openings.

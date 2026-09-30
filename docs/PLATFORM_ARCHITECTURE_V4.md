@@ -1,5 +1,8 @@
 # HireAndTech Platform Architecture V4 — Scalable Job Intelligence System
 
+> Historical planning document. For implemented behavior and current gaps, use
+> [architecture.md](architecture.md). Sections below may describe planned systems.
+
 > **Document version**: 4.0  
 > **Last verified against codebase**: 2026-09-26  
 > **Repository**: `backend-ht` (`origin/main` @ `285ce61`)

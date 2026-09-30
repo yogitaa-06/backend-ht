@@ -1,65 +1,32 @@
-# Development Documentation
+# Development
 
-This guide covers everything you need to start developing on the **HireAndTech** backend.
+Use Python 3.12 and uv. Copy `.env.example` to `.env`, start disposable PostgreSQL and
+Redis instances, then run:
 
-## Prerequisites
-* **Python 3.11+** (managed with `uv`).
-* **PostgreSQL** (local dev instance, default port 5432).
-* **Node** & **npm** for the frontend (already running separately).
-* **Playwright** browsers – install with `uv run playwright install` (used by the HiringCafe scraper).
-
-## Repository Setup
-```bash
-# Clone the repo (already done)
-cd "C:/Users/hntadmin/Desktop/Hire and Tech/backend-ht"
-
-# Install dependencies via uv (the project ships a uv.lock)
-uv sync
-
-# Copy the example environment file and fill in secrets
-cp .env.example .env
-# Edit .env – set DATABASE_URL, JWT_SECRET_KEY, etc.
-```
-
-## Database
-```bash
-# Create a local database
-echo "CREATE DATABASE hireandtech;" | psql -U postgres
-
-# Run migrations (Alembic)
+```powershell
+uv sync --frozen
 uv run alembic upgrade head
-```
-
-## Running the Service
-```bash
 uv run uvicorn app.main:app --reload
 ```
-*The server will be reachable at `http://127.0.0.1:8000`.*
 
-## Testing
-```bash
-# Unit tests
-uv run pytest -q
+Quality checks:
 
-# Coverage (target 90 %)
-uv run coverage run -m pytest && uv run coverage report
+```powershell
+uv lock --check
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy app tests
+uv run pytest
+uv run pytest --cov=app --cov-report=term-missing
+uv run alembic heads
 ```
-Tests are located under `tests/`.  They use `pytest‑asyncio` for async code and `respx`/`playwright` fixtures to mock external HTTP calls.
 
-## Code Quality
-* **Ruff** – `uv run ruff check .` and `uv run ruff format .`
-* **Mypy** – `uv run mypy app`
-* Pre‑commit hooks are configured (`.pre-commit-config.yaml`).  Run `uv run pre-commit install` to enable them locally.
+Database integration tests require `HIREANDTECH_TEST_DATABASE_URL` and may recreate
+objects in that database. Use a disposable database only. Unit collector tests use
+fixtures/mock transports and never depend on live provider sites. Live scripts are
+manual smoke tests.
 
-## IDE Integration
-* The project ships a **pyright** configuration (`pyrightconfig.json`).  Import the workspace into VS Code and enable the *Python* extension for IntelliSense.
-* Use the **Run > Debug** configuration `Backend` (launches `uvicorn` with the debugger attached).
-
-## Adding a New Scraper
-1. Create a new module under `app/jobs/sources/` implementing the `Collector` protocol.
-2. Register it in `app/jobs/registry.py` via `build_collector_registry()`.
-3. Add unit tests in `tests/unit/` covering discovery and normalization.
-4. Update `docs/scrapers.md` with the new source description.
-
----
-*All statements reflect the current repository implementation; no code changes are performed by this document.*
+Keep routes thin, place use-case orchestration in services, SQLAlchemy operations in
+repositories, and pure matching/normalization rules outside FastAPI and ARQ. Add a new
+migration for schema changes; do not edit applied history. Use comments for rationale,
+especially retry, idempotency, and security decisions.

@@ -44,5 +44,6 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy app tests
       - run: uv run pytest --cov=app --cov-report=term-missing
+      - run: uv run alembic heads
       - run: git diff --check
       - run: docker build --tag hireandtech-backend:test .
