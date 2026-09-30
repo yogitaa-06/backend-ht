@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.errors import InfrastructureError
+from app.core.errors import InfrastructureError, NotFoundError
 from app.schemas.search import AsyncSearchRequest
 from app.search.service import SearchService
 
@@ -72,3 +72,15 @@ async def test_start_search_handles_enqueue_failure(
 
     # The failure state should be committed
     assert session.commit.call_count == 2
+
+
+@pytest.mark.anyio
+async def test_get_search_progress_uses_domain_not_found_error(
+    search_service: SearchService, mock_repository: AsyncMock
+) -> None:
+    mock_repository.get_search.return_value = None
+
+    with pytest.raises(NotFoundError) as exc_info:
+        await search_service.get_search_progress(AsyncMock(), uuid4(), uuid4())
+
+    assert exc_info.value.code == "SEARCH_NOT_FOUND"
