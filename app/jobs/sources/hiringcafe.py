@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 
 from playwright.async_api import async_playwright
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.domain.jobs import JobSource
 from app.jobs.errors import SourceBlockedError
 from app.jobs.normalization import RawSourceJob
@@ -17,6 +17,8 @@ from app.jobs.parsing.employment_type import (
 from app.jobs.parsing.experience import extract_experience
 from app.jobs.parsing.salary import parse_salary
 from app.jobs.parsing.skills import extract_skills_from_text
+from app.jobs.targets import CollectionTarget
+from app.jobs.types import RemoteType
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +26,22 @@ logger = logging.getLogger(__name__)
 class HiringCafeCollector:
     source = JobSource.HIRINGCAFE
 
-    def __init__(self, *, client: Any = None):
-        # We don't use httpx client because Playwright is required
-        pass
+    def __init__(self, *, client: Any = None, settings: Settings | None = None) -> None:
+        # ``client`` remains accepted for collector-factory compatibility. HiringCafe
+        # requires a browser context rather than the shared HTTP transport.
+        self._settings = settings or get_settings()
 
-    async def collect(self, target: Any) -> list[RawSourceJob]:
-        settings = get_settings()
+    async def collect(self, target: CollectionTarget) -> list[RawSourceJob]:
+        settings = self._settings
         yielded_jobs: list[RawSourceJob] = []
 
         async with async_playwright() as p:
             # We must use Playwright to bypass Cloudflare Turnstile and Next.js RSC streaming
-            proxy_url = getattr(settings, "JOB_COLLECTION_PROXY_URL", None)
+            proxy_url = (
+                settings.job_collection_proxy_url.get_secret_value()
+                if settings.job_collection_proxy_url is not None
+                else None
+            )
             proxy_settings = {"server": proxy_url} if proxy_url else None
 
             browser = await p.chromium.launch(headless=True, proxy=proxy_settings)  # type: ignore
@@ -78,9 +85,7 @@ class HiringCafeCollector:
                     logger.error(f"Failed to find NEXT_DATA: {e}")
                     next_data_json = None
 
-                max_jobs = getattr(
-                    target, "max_jobs", getattr(settings, "JOB_COLLECTION_MAX_JOBS_PER_TARGET", 5)
-                )
+                max_jobs = target.max_jobs
 
                 if next_data_json:
                     data = json.loads(next_data_json)
@@ -108,7 +113,11 @@ class HiringCafeCollector:
                             )
 
                             commitment = v5.get("commitment")
-                            raw_emp = commitment[0] if (commitment and isinstance(commitment, list)) else None
+                            raw_emp = (
+                                commitment[0]
+                                if commitment and isinstance(commitment, list)
+                                else None
+                            )
                             emp_type = raw_emp if (raw_emp and raw_emp.strip()) else None
 
                             reqs = v5.get("requirements_summary")
@@ -124,21 +133,33 @@ class HiringCafeCollector:
                                 emp_type = normalize_employment_type(description)
 
                             tech_tools = [str(t) for t in (v5.get("technical_tools") or []) if t]
-                            text_skills = list(extract_skills_from_text(f"{title}\n{description or ''}"))
+                            text_skills = list(
+                                extract_skills_from_text(f"{title}\n{description or ''}")
+                            )
                             combined_skills: list[str] = []
                             for sk in tech_tools + text_skills:
                                 if sk not in combined_skills:
                                     combined_skills.append(sk)
                             skills = tuple(combined_skills)
 
-                            sal_min, sal_max, sal_curr, sal_period, sal_text = parse_salary(description)
-                            exp_min, exp_max, exp_text = extract_experience(f"{title}\n{description or ''}")
+                            sal_min, sal_max, sal_curr, sal_period, sal_text = parse_salary(
+                                description
+                            )
+                            exp_min, exp_max, exp_text = extract_experience(
+                                f"{title}\n{description or ''}"
+                            )
 
-                            remote_type = normalize_remote_type(f"{location or ''}\n{title}\n{description or ''}")
+                            remote_type = normalize_remote_type(
+                                f"{location or ''}\n{title}\n{description or ''}"
+                            )
                             remote = (
                                 True
-                                if remote_type == "remote"
-                                else (False if remote_type in ("hybrid", "onsite") else None)
+                                if remote_type is RemoteType.REMOTE
+                                else (
+                                    False
+                                    if remote_type in (RemoteType.HYBRID, RemoteType.ON_SITE)
+                                    else None
+                                )
                             )
 
                             pub_ms = v5.get("estimated_publish_date_millis")

@@ -201,3 +201,32 @@ def test_linkedin_collector_is_registered() -> None:
     assert registry.is_registered(JobSource.LINKEDIN)
     collector = registry.resolve(JobSource.LINKEDIN)
     assert collector.source is JobSource.LINKEDIN
+
+
+@pytest.mark.anyio
+async def test_linkedin_maps_on_site_to_non_remote() -> None:
+    html = """
+    <h2 class="top-card-layout__title">Backend Engineer</h2>
+    <a class="topcard__org-name-link">Example Tech</a>
+    <span class="topcard__flavor topcard__flavor--bullet">On-site in Austin, TX</span>
+    <div class="show-more-less-html__markup">Build APIs.</div>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=html, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        jobs = await LinkedInCollector(client=client, request_delay_seconds=0).fetch_details(
+            _target(),
+            [
+                DiscoveredSourceJob(
+                    JobSource.LINKEDIN.value,
+                    "123",
+                    "Backend Engineer",
+                    "https://www.linkedin.com/jobs/view/123",
+                )
+            ],
+        )
+
+    assert jobs[0].remote_type == "on_site"
+    assert jobs[0].remote is False

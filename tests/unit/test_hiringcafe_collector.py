@@ -156,6 +156,25 @@ async def test_hiringcafe_collector_extracts_all_fields(mock_pw: MagicMock) -> N
 
 @pytest.mark.anyio
 @patch("app.jobs.sources.hiringcafe.async_playwright")
+async def test_hiringcafe_maps_on_site_to_non_remote(mock_pw: MagicMock) -> None:
+    hits = [
+        {
+            "id": "on-site-job",
+            "job_information": {"title": "Backend Engineer"},
+            "v5_processed_job_data": {"formatted_workplace_location": "On-site in Seattle, WA"},
+        }
+    ]
+    browser = MockBrowser(MockContext(MockPage(next_data_hits=hits)))
+    mock_pw.return_value = MockPlaywright(browser)
+
+    jobs = await HiringCafeCollector().collect(_target(max_jobs=1))
+
+    assert jobs[0].remote_type == "on_site"
+    assert jobs[0].remote is False
+
+
+@pytest.mark.anyio
+@patch("app.jobs.sources.hiringcafe.async_playwright")
 async def test_hiringcafe_collector_handles_malformed_job(mock_pw: MagicMock) -> None:
     hits: list[dict[str, Any]] = [
         {"v5_processed_job_data": {}},

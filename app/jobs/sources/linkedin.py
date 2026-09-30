@@ -31,6 +31,7 @@ from app.jobs.parsing.salary import parse_salary
 from app.jobs.parsing.skills import extract_skills_from_text
 from app.jobs.targets import CollectionTarget
 from app.jobs.transport import build_collection_client
+from app.jobs.types import RemoteType
 
 logger = logging.getLogger(__name__)
 
@@ -465,8 +466,8 @@ class LinkedInCollector:
         remote_type = normalize_remote_type(f"{location}\n{title}\n{description}")
         remote = (
             True
-            if remote_type == "remote"
-            else (False if remote_type in ("hybrid", "onsite") else None)
+            if remote_type is RemoteType.REMOTE
+            else (False if remote_type in (RemoteType.HYBRID, RemoteType.ON_SITE) else None)
         )
 
         return RawSourceJob(

@@ -211,7 +211,7 @@ def merge_skills(
             seen.add(s.casefold())
             merged.append(s)
 
-    for s in (text_skills or []):
+    for s in text_skills or []:
         norm = normalize_skill(s) or s
         if norm.casefold() not in seen:
             seen.add(norm.casefold())

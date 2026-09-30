@@ -13,13 +13,16 @@ from unicodedata import normalize as unicode_normalize
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.jobs.parsing import (
-    extract_experience,
+    extract_experience as extract_experience,
+)
+from app.jobs.parsing import (
     extract_skills_from_text,
     merge_skills,
     normalize_employment_type,
     normalize_remote_type,
     parse_salary,
 )
+from app.jobs.types import EmploymentType, RemoteType
 
 ROLE_FAMILIES = {
     "backend",
@@ -69,7 +72,6 @@ class DiscoveredSourceJob:
     url: str | None = None
 
 
-
 @dataclass(frozen=True)
 class RawSourceJob:
     """Source-neutral job payload emitted by every collector adapter."""
@@ -86,9 +88,9 @@ class RawSourceJob:
     salary_max: Decimal | None = None
     salary_currency: str | None = None
     salary_period: str | None = None
-    employment_type: str | None = None
+    employment_type: str | EmploymentType | None = None
     remote: bool | None = None
-    remote_type: str | None = None
+    remote_type: RemoteType | None = None
     posted_at: datetime | None = None
     source_updated_at: datetime | None = None
     skills: tuple[str, ...] = ()
@@ -112,7 +114,7 @@ class NormalizedJob:
     job_url: str | None
     description: str | None
     salary_text: str | None
-    employment_type: str | None
+    employment_type: str | EmploymentType | None
     remote: bool | None
     skills: list[str]
     posted_at: datetime | None
@@ -126,7 +128,7 @@ class NormalizedJob:
     salary_max: Decimal | None = None
     salary_currency: str | None = None
     salary_period: str | None = None
-    remote_type: str | None = None
+    remote_type: RemoteType | None = None
 
 
 def normalize_title(title: str) -> str:
@@ -257,7 +259,7 @@ def normalize_job(raw: RawSourceJob) -> NormalizedJob:
         f"{raw.location or ''}\n{raw.description or ''}", remote_flag=raw.remote
     )
     remote = raw.remote
-    if remote is None and remote_type == "remote":
+    if remote is None and remote_type is RemoteType.REMOTE:
         remote = True
 
     url = normalize_url(raw.url)
