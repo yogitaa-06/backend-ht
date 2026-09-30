@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from app.core.config import Settings
-from app.queue.client import create_queue_pool
+from app.queue.connection import create_queue_pool
 
 
 async def main() -> None:

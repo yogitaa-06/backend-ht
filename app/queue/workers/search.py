@@ -7,8 +7,8 @@ from arq.worker import func
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.session import Database
-from app.queue.client import redis_settings_from_app
-from app.queue.search_tasks import run_job_search
+from app.queue.connection import redis_settings_from_app
+from app.queue.tasks.search import run_job_search
 from app.search.execution import SearchExecutionService
 
 _settings = Settings()

@@ -18,9 +18,9 @@ from app.jobs.errors import (
     SourceUnavailableError,
     TemporaryCollectionError,
 )
-from app.jobs.locks import CollectionLockManager
 from app.jobs.sources.registry import CollectorRegistry
 from app.jobs.targets import CollectionTarget
+from app.queue.locks import CollectionLockManager
 
 logger = logging.getLogger(__name__)
 CollectionStatus = Literal["success", "partial", "failed", "skipped_locked", "source_unavailable"]
