@@ -151,6 +151,7 @@ async def test_upsert_updates_when_hash_changes(
         await repository.upsert(session, job)
 
     from dataclasses import replace
+
     job = replace(job, content_hash="hash2", job_title="Senior Software Engineer")
     async with database.sessions() as session, session.begin():
         result = await repository.upsert_with_outcome(session, job)

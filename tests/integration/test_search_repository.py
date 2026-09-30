@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
@@ -29,7 +30,7 @@ pytestmark = [
 
 
 @pytest.fixture(scope="module")
-def database() -> Database:
+def database() -> Iterator[Database]:
     assert TEST_DATABASE_URL is not None
     environment = os.environ.copy()
     environment.update(
@@ -53,7 +54,15 @@ def database() -> Database:
         database_url=SecretStr(TEST_DATABASE_URL),
         database_ssl_mode="disable",
     )
-    return Database(settings)
+    db = Database(settings)
+    yield db
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+        _task = loop.create_task(db.close())
+    except RuntimeError:
+        asyncio.run(db.close())
 
 
 @pytest.fixture
@@ -62,11 +71,15 @@ def repository() -> SearchRepository:
 
 
 async def test_create_and_get_search(database: Database, repository: SearchRepository) -> None:
+    from app.domain.profiles import Profile
+
     user_id = uuid4()
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id, status=SearchStatus.QUEUED, query="Software Engineer", requested_limit=10
     )
     async with database.sessions() as session, session.begin():
+        session.add(profile)
         await repository.create_search(session, search)
 
     async with database.sessions() as session:
@@ -81,12 +94,16 @@ async def test_create_and_get_search(database: Database, repository: SearchRepos
 async def test_get_search_enforces_ownership(
     database: Database, repository: SearchRepository
 ) -> None:
+    from app.domain.profiles import Profile
+
     user_id = uuid4()
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test2@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.QUEUED,
     )
     async with database.sessions() as session, session.begin():
+        session.add(profile)
         await repository.create_search(session, search)
 
     async with database.sessions() as session:
@@ -96,7 +113,10 @@ async def test_get_search_enforces_ownership(
 
 
 async def test_save_and_get_results(database: Database, repository: SearchRepository) -> None:
+    from app.domain.profiles import Profile
+
     user_id = uuid4()
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test3@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -119,6 +139,7 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
     )
 
     async with database.sessions() as session, session.begin():
+        session.add(profile)
         session.add_all([job1, job2])
         await session.flush()
 
@@ -144,7 +165,10 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
 
 
 async def test_clear_results(database: Database, repository: SearchRepository) -> None:
+    from app.domain.profiles import Profile
+
     user_id = uuid4()
+    profile = Profile(id=user_id, auth_user_id=uuid4(), email="test4@example.com", is_active=True)
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -160,6 +184,7 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
     )
 
     async with database.sessions() as session, session.begin():
+        session.add(profile)
         session.add(job1)
         await session.flush()
 

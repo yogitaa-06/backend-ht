@@ -22,9 +22,17 @@ uv run alembic heads
 ```
 
 Database integration tests require `HIREANDTECH_TEST_DATABASE_URL` and may recreate
-objects in that database. Use a disposable database only. Unit collector tests use
-fixtures/mock transports and never depend on live provider sites. Live scripts are
-manual smoke tests.
+objects in that database. Use a disposable database only. To run them locally with
+a dedicated PostgreSQL database, use:
+
+```powershell
+$env:HIREANDTECH_TEST_DATABASE_URL = "postgresql://postgres:admin1234@localhost:5432/hireandtech_test"
+uv run alembic upgrade head
+uv run pytest
+```
+
+Unit collector tests use fixtures/mock transports and never depend on live provider sites.
+Live scripts are manual smoke tests.
 
 Keep routes thin, place use-case orchestration in services, SQLAlchemy operations in
 repositories, and pure matching/normalization rules outside FastAPI and ARQ. Add a new
