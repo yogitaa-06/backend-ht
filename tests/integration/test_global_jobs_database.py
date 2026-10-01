@@ -30,6 +30,7 @@ pytestmark = [
 
 from collections.abc import AsyncIterator
 
+
 @pytest.fixture
 async def database() -> AsyncIterator[Database]:
     assert TEST_DATABASE_URL is not None
@@ -161,3 +162,68 @@ async def test_upsert_updates_when_hash_changes(
         result = await repository.upsert_with_outcome(session, job)
         assert result.status == JobUpsertStatus.UPDATED
         assert result.job.job_title == "Senior Software Engineer"
+
+
+async def test_upsert_skips_when_hash_matches(
+    database: Database, repository: GlobalJobRepository
+) -> None:
+    job = _dummy_normalized()
+    async with database.sessions() as session, session.begin():
+        await repository.upsert(session, job)
+        result = await repository.upsert_with_outcome(session, job)
+        assert result.status == JobUpsertStatus.SKIPPED
+
+
+async def test_early_returns_on_empty_ids(
+    database: Database, repository: GlobalJobRepository
+) -> None:
+    async with database.sessions() as session:
+        existing = await repository.get_existing_by_external_ids(session, "dice", [])
+        assert existing == {}
+
+    async with database.sessions() as session, session.begin():
+        touched = await repository.touch_seen(session, "dice", [])
+        assert touched == 0
+
+
+async def test_search_jobs_with_all_filters(
+    database: Database, repository: GlobalJobRepository
+) -> None:
+    job = _dummy_normalized()
+    async with database.sessions() as session, session.begin():
+        await repository.upsert(session, job)
+
+    async with database.sessions() as session:
+        # Search query
+        jobs, total = await repository.search(session, query="Software")
+        assert total >= 1
+
+        # Search role_families
+        jobs, total = await repository.search(session, role_families=["engineering"])
+        assert total >= 1
+
+        # Search location
+        jobs, total = await repository.search(session, location="Remote")
+        assert total >= 1
+
+        # Search employment_type
+        jobs, total = await repository.search(session, employment_type="full-time")
+        assert total >= 1
+
+
+async def test_by_id_and_stats(database: Database, repository: GlobalJobRepository) -> None:
+    job = _dummy_normalized()
+    async with database.sessions() as session, session.begin():
+        persisted = await repository.upsert(session, job)
+
+    async with database.sessions() as session:
+        fetched = await repository.by_id(session, persisted.id)
+        assert fetched is not None
+        assert fetched.id == persisted.id
+
+        stats = await repository.stats(session)
+        assert stats["total_jobs"] >= 1
+        assert stats["active_jobs"] >= 1
+        assert stats["jobs_added_last_24_hours"] >= 1
+        assert "dice" in stats["jobs_by_source"]
+        assert "engineering" in stats["jobs_by_role_family"]

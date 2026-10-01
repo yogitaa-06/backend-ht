@@ -68,7 +68,9 @@ async def test_create_and_get_search(database: Database, repository: SearchRepos
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
+    profile = Profile(
+        id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True
+    )
     search = JobSearch(
         user_id=user_id, status=SearchStatus.QUEUED, query="Software Engineer", requested_limit=10
     )
@@ -91,7 +93,9 @@ async def test_get_search_enforces_ownership(
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
+    profile = Profile(
+        id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True
+    )
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.QUEUED,
@@ -110,7 +114,9 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
+    profile = Profile(
+        id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True
+    )
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -140,8 +146,26 @@ async def test_save_and_get_results(database: Database, repository: SearchReposi
         await repository.create_search(session, search)
 
         results = [
-            JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9, skills_score=0.9, experience_score=0.9, location_score=0.9, freshness_score=0.9),
-            JobSearchResult(search_id=search.id, job_id=job2.id, rank=2, match_score=0.8, skills_score=0.8, experience_score=0.8, location_score=0.8, freshness_score=0.8),
+            JobSearchResult(
+                search_id=search.id,
+                job_id=job1.id,
+                rank=1,
+                match_score=0.9,
+                skills_score=0.9,
+                experience_score=0.9,
+                location_score=0.9,
+                freshness_score=0.9,
+            ),
+            JobSearchResult(
+                search_id=search.id,
+                job_id=job2.id,
+                rank=2,
+                match_score=0.8,
+                skills_score=0.8,
+                experience_score=0.8,
+                location_score=0.8,
+                freshness_score=0.8,
+            ),
         ]
         await repository.save_results(session, results)
 
@@ -162,7 +186,9 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
     from app.domain.profiles import Profile
 
     user_id = uuid4()
-    profile = Profile(id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True)
+    profile = Profile(
+        id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True
+    )
     search = JobSearch(
         user_id=user_id,
         status=SearchStatus.COMPLETED,
@@ -183,7 +209,18 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
         await session.flush()
 
         await repository.create_search(session, search)
-        results = [JobSearchResult(search_id=search.id, job_id=job1.id, rank=1, match_score=0.9, skills_score=0.9, experience_score=0.9, location_score=0.9, freshness_score=0.9)]
+        results = [
+            JobSearchResult(
+                search_id=search.id,
+                job_id=job1.id,
+                rank=1,
+                match_score=0.9,
+                skills_score=0.9,
+                experience_score=0.9,
+                location_score=0.9,
+                freshness_score=0.9,
+            )
+        ]
         await repository.save_results(session, results)
 
     async with database.sessions() as session, session.begin():
@@ -193,3 +230,30 @@ async def test_clear_results(database: Database, repository: SearchRepository) -
         items, total = await repository.get_results(session, search.id, page=1, page_size=10)
         assert total == 0
         assert len(items) == 0
+
+
+async def test_get_search_for_worker(database: Database, repository: SearchRepository) -> None:
+    from app.domain.profiles import Profile
+
+    user_id = uuid4()
+    profile = Profile(
+        id=user_id, auth_user_id=uuid4(), email=f"test_{uuid4()}@example.com", is_active=True
+    )
+    search = JobSearch(
+        user_id=user_id,
+        status=SearchStatus.QUEUED,
+    )
+    async with database.sessions() as session, session.begin():
+        session.add(profile)
+        await repository.create_search(session, search)
+
+    async with database.sessions() as session:
+        fetched = await repository.get_search_for_worker(session, search.id)
+        assert fetched is not None
+        assert fetched.id == search.id
+
+
+async def test_save_results_empty(database: Database, repository: SearchRepository) -> None:
+    async with database.sessions() as session, session.begin():
+        await repository.save_results(session, [])
+    # Should not raise an error

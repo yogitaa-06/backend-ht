@@ -106,7 +106,10 @@ async def test_get_recommendations_ranks_and_paginates(
     mock_job_repo.search.return_value = ([job1, job2, job3], 3)
 
     # Only job1 and job2 are eligible
-    mock_is_eligible.side_effect = lambda candidate, job: job.id in (job1.id, job2.id)
+    def fake_is_eligible(candidate: Candidate, job: MatchableJob) -> bool:
+        return job.id in (job1.id, job2.id)
+
+    mock_is_eligible.side_effect = fake_is_eligible
 
     # Rank job2 higher than job1
     def fake_rank(candidate: Candidate, job: MatchableJob) -> dict[str, float]:

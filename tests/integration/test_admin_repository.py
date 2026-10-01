@@ -29,6 +29,7 @@ pytestmark = [
 
 from collections.abc import AsyncIterator
 
+
 @pytest.fixture
 async def database() -> AsyncIterator[Database]:
     assert TEST_DATABASE_URL is not None
@@ -111,3 +112,67 @@ async def test_admin_repository_resume_counts(
         assert "active_resumes" in counts
         assert "users_with_resumes" in counts
         assert "parsed_candidate_profiles" in counts
+
+
+async def test_admin_repository_resumes_page(
+    database: Database, repository: AdminRepository
+) -> None:
+    from app.domain.resumes import Resume, ResumeStatus
+
+    async with database.sessions() as session, session.begin():
+        user = Profile(auth_user_id=uuid4(), email=f"res_{uuid4()}@example.com")
+        session.add(user)
+        await session.flush()
+        resume = Resume(
+            owner_profile_id=user.id,
+            original_filename="resume.pdf",
+            storage_bucket="resumes",
+            storage_object_key=f"key_{uuid4()}",
+            content_type="application/pdf",
+            size_bytes=1024,
+            sha256="a" * 64,
+            status=ResumeStatus.UPLOADED,
+        )
+        session.add(resume)
+
+    async with database.sessions() as session:
+        rows, total = await repository.resumes_page(session, page=1, page_size=10)
+        assert total > 0
+        assert len(rows) > 0
+        assert isinstance(rows[0][0], Resume)
+
+
+async def test_admin_repository_resume(database: Database, repository: AdminRepository) -> None:
+    from app.domain.resumes import Resume, ResumeStatus
+
+    async with database.sessions() as session, session.begin():
+        user = Profile(auth_user_id=uuid4(), email=f"res2_{uuid4()}@example.com")
+        session.add(user)
+        await session.flush()
+        resume = Resume(
+            owner_profile_id=user.id,
+            original_filename="resume2.pdf",
+            storage_bucket="resumes",
+            storage_object_key=f"key2_{uuid4()}",
+            content_type="application/pdf",
+            size_bytes=1024,
+            sha256="b" * 64,
+            status=ResumeStatus.UPLOADED,
+        )
+        session.add(resume)
+
+    async with database.sessions() as session:
+        result = await repository.resume(session, resume.id)
+        assert result is not None
+        assert result[0].id == resume.id
+
+        missing = await repository.resume(session, uuid4())
+        assert missing is None
+
+
+async def test_admin_repository_security_count(
+    database: Database, repository: AdminRepository
+) -> None:
+    async with database.sessions() as session:
+        count = await repository.security_count(session)
+        assert count == 0
